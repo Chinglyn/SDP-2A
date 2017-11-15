@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ArrayOfBoardRecordInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <BoardRecordInfo>
+    <Com>COM12</Com>
+    <Baud>9600</Baud>
+    <State>true</State>
+    <Instance>
+      <ReceiveEventFlag>false</ReceiveEventFlag>
+      <PortName>COM12</PortName>
+      <Baud>9600</Baud>
+    </Instance>
+    <ItemName>MCB</ItemName>
+    <BoardType>电路板型号：SDP_2A</BoardType>
+    <FirmwareVersion>固件版本号：1.2</FirmwareVersion>
+    <SoftVersion>软件版本号：1.0</SoftVersion>
+  </BoardRecordInfo>
+</ArrayOfBoardRecordInfo>

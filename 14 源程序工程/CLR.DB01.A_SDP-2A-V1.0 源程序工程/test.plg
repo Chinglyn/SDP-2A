@@ -1,0 +1,266 @@
+<html>
+<body>
+<pre>
+<h1>礦ision Build Log</h1>
+<h2>Project:</h2>
+E:\ZB-Work\项目\SDP-2A\程序\设计程序\SDP-2A-V1.0\test.uvproj
+Project File Date:  09/20/2016
+
+<h2>Output:</h2>
+Rebuild target 'Target 1'
+assembling STARTUP.A51...
+compiling main.c...
+linking...
+Program Size: data=9.0 xdata=0 code=69
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 0 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+compiling harddrive.c...
+linking...
+Program Size: data=9.0 xdata=0 code=69
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 0 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+linking...
+Program Size: data=9.0 xdata=0 code=69
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 0 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+main.c(69): error C136: invalid dimension size: [0]
+main.c(69): error C231: 'TEST': redefinition
+main.c(70): error C279: 'TEST': multiple initialization
+main.c(71): error C279: 'TEST': multiple initialization
+main.c(71): error C231: 'TEST': redefinition
+main.c(72): error C279: 'TEST': multiple initialization
+main.c(72): error C231: 'TEST': redefinition
+compiling harddrive.c...
+compiling uart1.c...
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(69): error C136: invalid dimension size: [0]
+main.c(69): error C231: 'X': redefinition
+main.c(70): error C279: 'X': multiple initialization
+main.c(71): error C279: 'X': multiple initialization
+main.c(71): error C231: 'X': redefinition
+main.c(72): error C279: 'X': multiple initialization
+main.c(72): error C231: 'X': redefinition
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(100): error C202: 'uart1SendingFlag': undefined identifier
+main.c(106): error C202: 'revnum': undefined identifier
+main.c(107): error C202: 'revnum': undefined identifier
+main.c(108): error C202: 'i': undefined identifier
+main.c(110): error C202: 'revnum': undefined identifier
+main.c(112): error C202: 'uart1ReceivedFlag': undefined identifier
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(100): error C202: 'uart1SendingFlag': undefined identifier
+main.c(106): error C202: 'revnum': undefined identifier
+main.c(107): error C202: 'revnum': undefined identifier
+main.c(108): error C202: 'i': undefined identifier
+main.c(110): error C202: 'revnum': undefined identifier
+main.c(112): error C202: 'uart1ReceivedFlag': undefined identifier
+Target not created
+Build target 'Target 1'
+compiling main.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?INITUART1?UART1
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=125.0 xdata=0 code=385
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+main.c(69): error C136: invalid dimension size: [0]
+main.c(69): error C231: 'test1': redefinition
+main.c(70): error C279: 'test1': multiple initialization
+main.c(71): error C279: 'test1': multiple initialization
+main.c(71): error C231: 'test1': redefinition
+main.c(72): error C279: 'test1': multiple initialization
+main.c(72): error C231: 'test1': redefinition
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(69): error C136: invalid dimension size: [0]
+main.c(69): error C231: 'test1': redefinition
+main.c(70): error C279: 'test1': multiple initialization
+main.c(71): error C279: 'test1': multiple initialization
+main.c(71): error C231: 'test1': redefinition
+main.c(72): error C279: 'test1': multiple initialization
+main.c(72): error C231: 'test1': redefinition
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(69): error C136: invalid dimension size: [0]
+main.c(69): error C231: 'test1': redefinition
+main.c(70): error C279: 'test1': multiple initialization
+main.c(71): error C279: 'test1': multiple initialization
+main.c(71): error C231: 'test1': redefinition
+main.c(72): error C279: 'test1': multiple initialization
+main.c(72): error C231: 'test1': redefinition
+compiling uart1.c...
+uart1.c(10): warning C318: can't open file 'uatr1.h'
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(78): error C141: syntax error near 'unsigned'
+main.c(78): error C202: 'test1': undefined identifier
+main.c(80): error C202: 'test1': undefined identifier
+main.c(81): error C202: 'test1': undefined identifier
+main.c(82): error C202: 'test1': undefined identifier
+main.c(83): error C202: 'test1': undefined identifier
+main.c(88): error C202: 'test1': undefined identifier
+Target not created
+Rebuild target 'Target 1'
+assembling STARTUP.A51...
+compiling main.c...
+main.c(77): error C141: syntax error near 'unsigned'
+main.c(77): error C202: 'test1': undefined identifier
+main.c(79): error C202: 'test1': undefined identifier
+main.c(80): error C202: 'test1': undefined identifier
+main.c(81): error C202: 'test1': undefined identifier
+main.c(82): error C202: 'test1': undefined identifier
+main.c(87): error C202: 'test1': undefined identifier
+compiling harddrive.c...
+compiling uart1.c...
+uart1.c(10): warning C318: can't open file 'uatr1.h'
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(77): error C141: syntax error near 'unsigned'
+main.c(77): error C202: 'test1': undefined identifier
+main.c(79): error C202: 'test1': undefined identifier
+main.c(80): error C202: 'test1': undefined identifier
+main.c(81): error C202: 'test1': undefined identifier
+main.c(82): error C202: 'test1': undefined identifier
+main.c(87): error C202: 'test1': undefined identifier
+compiling uart1.c...
+uart1.c(10): warning C318: can't open file 'uatr1.h'
+Target not created
+Build target 'Target 1'
+compiling main.c...
+main.c(77): error C141: syntax error near 'unsigned'
+main.c(77): error C202: 'test1': undefined identifier
+main.c(82): error C202: 'test1': undefined identifier
+Target not created
+Build target 'Target 1'
+compiling main.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+Program Size: data=115.0 xdata=0 code=379
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+main.c(81): error C202: 'test1': undefined identifier
+Target not created
+Build target 'Target 1'
+compiling main.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+Program Size: data=115.0 xdata=0 code=379
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+Program Size: data=115.0 xdata=0 code=379
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=125.0 xdata=0 code=390
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 1 Warning(s).
+Build target 'Target 1'
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L15: MULTIPLE CALL TO SEGMENT
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+    CALLER1: ?C_C51STARTUP
+    CALLER2: ?PR?UART1ISR?UART1
+Program Size: data=128.0 xdata=0 code=437
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L15: MULTIPLE CALL TO SEGMENT
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+    CALLER1: ?C_C51STARTUP
+    CALLER2: ?PR?UART1ISR?UART1
+Program Size: data=128.0 xdata=0 code=437
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+*** WARNING L15: MULTIPLE CALL TO SEGMENT
+    SEGMENT: ?PR?_UART1SENDDATA?UART1
+    CALLER1: ?C_C51STARTUP
+    CALLER2: ?PR?UART1ISR?UART1
+Program Size: data=128.0 xdata=0 code=440
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 2 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=115.0 xdata=0 code=429
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 1 Warning(s).
+Build target 'Target 1'
+compiling main.c...
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=115.0 xdata=0 code=429
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 1 Warning(s).
+Build target 'Target 1'
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=115.0 xdata=0 code=429
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 1 Warning(s).
+Rebuild target 'Target 1'
+assembling STARTUP.A51...
+compiling main.c...
+compiling harddrive.c...
+compiling uart1.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_UART1SENDONEBYTE?UART1
+Program Size: data=115.0 xdata=0 code=429
+creating hex file from "SDP-2A"...
+"SDP-2A" - 0 Error(s), 1 Warning(s).

@@ -1,0 +1,10 @@
+"STARTUP.obj",
+"main.obj",
+"harddrive.obj",
+"uart1.obj",
+"ds18b20.obj",
+"moto.obj",
+"comwithpc.obj",
+"time.obj" 
+TO "SDP-2A" 
+RAMSIZE(256) 

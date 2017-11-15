@@ -1,0 +1,920 @@
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE MOTO
+OBJECT MODULE PLACED IN moto.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE moto.c COMPACT BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          
+   2          /*************  功能说明    **************
+   3          
+   4          本程序演示使用定时器做软件PWM。  
+   5          定时1ms中断定时器2做16位自动重装。
+   6          
+   7          本部分包含，直流电机全速运转驱动，以及PWM运转驱动
+   8          
+   9          
+  10          ******************************************/
+  11          
+  12          
+  13          
+  14          #include "stc15w4k32s4.h"
+  15          #include "unit.h"
+  16          #include "harddrive.h"
+  17          #include "uart1.h"
+  18          #include "ds18b20.h"
+  19          #include "moto.h"
+  20          
+  21          // 全局变量 
+  22          
+  23          
+  24          volatile  u8 Paper_Send_Flag1=0;  //胶片输送状态标志1
+  25          volatile  u8 Paper_Send_Flag2=0;  //胶片输送状态标志2
+  26          volatile  u8 Paper_Send_Error=0;   //卡片标志
+  27          volatile  u8 Paper_Send_OK=1;   //0 就绪，1 正在打印，2 出片，3 卡片标志
+  28          
+  29          
+  30          volatile  u8 PWM1count=0;  //定时器中PWM 计数值   占空比
+  31          volatile  u8 PWM2count=0;  //定时器中PWM 计数值   占空比
+  32          
+  33          volatile  u8 PWM1time=1;  //PWM 占空比值  //占空比改为浮点数 
+  34          volatile  u8 PWM2time=1;  //PWM 占空比值  
+  35          
+  36          volatile  u8 PWMDC1Direction=1;  //电机1 方向标志  1 正转  2 反转
+  37          volatile  u8 PWMDC2Direction=1;  //电机2 方向标志  1 正转  2 反转
+  38          
+  39          volatile  u8 DC1Run=0;  //电机1 方向标志  1 正转  2 反转
+  40          volatile  u8 DC2Run=0;  //电机2 方向标志  1 正转  2 反转
+  41          
+  42          volatile  u8 MOTO_DC1_Run_Time=0;  //电机运行时间
+  43          volatile  u8 MOTO_DC2_Run_Time=0;  //电机运行时间
+  44          
+  45          volatile  u8 Heat_Time=0;  //胶片留在通道中的加热时间。 单位 秒
+  46          volatile  u8 Heat_Time_Flag=0;  //胶片加热完成标志
+  47          
+  48          volatile  u8 Heat_Time_Flag_start=0;  //胶片加热完成标志
+  49          volatile  u8 SendPaper_Time_Flag_start=0;  //胶片加热完成标志
+  50          
+  51          volatile  u32 DC1_Run_Time_count=0;  //定时器中PWM 计数值  电机运行时间
+  52          volatile  u32 DC2_Run_Time_count=0;  //定时器中PWM 计数值  电机运行时间
+  53          
+  54          
+  55          //volatile  u8 DC1DECAY=1;  //电机1 衰减方式标志
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 2   
+
+  56          //volatile  u8 DC2DECAY=1;  //电机2 衰减方式标志
+  57          
+  58          volatile  u8 MOTO2_LH_Control=0;     //电机2 离合控制
+  59          volatile  u8 MOTO2_LH_Flag=3;        //电机2 离合控制
+  60          
+  61          // volatile u8 MOTO1_SEND_Flag=0;  
+  62          
+  63          
+  64          volatile  u32 JiuXu_Count=0;  //胶片加热完成标志
+  65          volatile  u8 JiuXu_Count_start=0;  //胶片加热完成标志
+  66          
+  67          
+  68          
+  69          /****************电机控制系统相关标识定义********************/
+  70          
+  71          //起始切刀
+  72          u8 Sensor_P0_flag=0;        //切刀传感器动作标识
+  73          u8 Sensor_P0_new_state;     //当前检测状态
+  74          u8 Sensor_P0_old_state=1;   //上一状态
+  75          //结束切刀
+  76          u8 Sensor_P1_flag=0;         //切刀传感器动作标识
+  77          u8 Sensor_P1_new_state;      
+  78          u8 Sensor_P1_old_state=0;    
+  79          
+  80          //胶片进入通道口传感器
+  81          u8 Sensor_P2_flag=0;     //胶片进入通道口标志
+  82          u8 Sensor_P2_f10=0;      //状态由1--0 
+  83          u8 Sensor_P2_f01=0;        //状态由0--1
+  84          u8 Sensor_P2_new_state;    //当前检测状态
+  85          u8 Sensor_P2_old_state=0;  //上一状态
+  86          
+  87          u8 Sensor_P2_Moto_Stop_flag=0; //慢转停止标志
+  88          
+  89          //u32 Sensor_P2_f10_count=0;    //完成之后延时两秒计数
+  90          
+  91          
+  92          
+  93          //离合关
+  94          //u8 Sensor_P3_flag=0;         //离合关传感器状态标识
+  95          u8 Sensor_P3_new_state;      //离合关传感器最新状态
+  96          u8 Sensor_P3_old_state=0;    //离合关传感器上一次状态
+  97          
+  98          //离合开
+  99          //u8 Sensor_P4_flag=0;     //离合开传感器状态
+ 100          u8 Sensor_P4_new_state;  //离合开传感器最新状态
+ 101          u8 Sensor_P4_old_state=0;  //离合开传感器上一次状态
+ 102          
+ 103          
+ 104          u8 Sensor_P5_flag_start=0;    //标识是否需要进行出片检测
+ 105          u8 Sensor_P5_flag=0;          //出片口传感器  从高--变低--变高  表示胶片正常输出。  1 表示正常输出
+ 106          u8 Sensor_P5_f10=0;          //出片口传感器  从高--变低 标识
+ 107          u8 Sensor_P5_new_state=0;    //当前检测状态 
+ 108          u8 Sensor_P5_old_state=0;    //上一状态
+ 109          
+ 110          u8 Sensor_P5_OK_flag=0;    //传感器检测完成标志
+ 111          u8 Sensor_P5_OK_flag_count=0;    //完成之后延时两秒计数
+ 112          
+ 113          
+ 114          u8 Sensor_P6_flag=0;              //码盘传感标识 --加热阶段到位标志
+ 115          
+ 116          u8 Sensor_P6_SendPaper_flag=0;    //码盘传感标识 --送片阶段超时标志
+ 117          
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 3   
+
+ 118          u8 Sensor_P6_new_state=0;
+ 119          u8 Sensor_P6_old_state=0;
+ 120          
+ 121          u16 Sensor_P6_flag_cont=0;    //加热步数计数器
+ 122          u8 Sensor_P6_cont_start=0;    //加热行程开始计数标识
+ 123          
+ 124          u16 Sensor_P6_SendPaper_flag_cont=0; //送纸步数计数器
+ 125          u16 SendPaper_P6_Time_Flag_start=0; // 送纸超时计数开始标志
+ 126          
+ 127          
+ 128          
+ 129          /****************************************************************/
+ 130          volatile  u32 auto_paper_a4_Count=0;  //报告送纸计数
+ 131          volatile  u32 auto_paper_a4_Count2=0;  //报告送纸计数--超时计数
+ 132          volatile  u8 auto_paper_a4_Count_Flag=0;  //报告送纸标志
+ 133          
+ 134          volatile  u8 auto_paper_a4_Max_Flag=0;  //报告送纸标志
+ 135          
+ 136          
+ 137          
+ 138          
+ 139          
+ 140          /*******************不做PWM控制 电机驱动********************/
+ 141          /********************************************************************
+ 142          函数功能：电机1正转
+ 143          入口参数：无。
+ 144          返    回：无。
+ 145          备    注：无。
+ 146          ********************************************************************/
+ 147          /*
+ 148          void MotoDc1Forward(void)
+ 149          {
+ 150             MOTO1_IN1On();
+ 151             MOTO1_IN2Off();
+ 152          }
+ 153          8/
+ 154          /********************************************************************
+ 155          函数功能：电机1反转
+ 156          入口参数：无。
+ 157          返    回：无。
+ 158          备    注：无。
+ 159          ********************************************************************/
+ 160          /*
+ 161          void MotoDc1Referse(void)
+ 162          {
+ 163             MOTO1_IN1Off();
+ 164             MOTO1_IN2On();
+ 165          }
+ 166          */ 
+ 167          /********************************************************************
+ 168          函数功能：电机1停止
+ 169          入口参数：无。
+ 170          返    回：无。
+ 171          备    注：无。
+ 172          ********************************************************************/
+ 173          void MotoDc1Stop(void)
+ 174          {
+ 175   1         DC1Run=0;
+ 176   1         MOTO_DC1_Run_Time=0;
+ 177   1         MOTO1_IN1Off();
+ 178   1         MOTO1_IN2Off();
+ 179   1         PWM2_SetPwmWide(0);     //输出全低电平
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 4   
+
+ 180   1         PWM3_SetPwmWide(0);     //输出低电平 
+ 181   1      }
+ 182           
+ 183          
+ 184          
+ 185          //20161104  增加PWM控制出片电机
+ 186          
+ 187          
+ 188          
+ 189          sbit PWM2   =   P3^7;
+ 190          sbit PWM3   =   P2^1;
+ 191          sbit PWM4   =   P2^2;
+ 192          sbit PWM5   =   P2^3;
+ 193          sbit PWM6   =   P0^7;
+ 194          sbit PWM7   =   P0^6;
+ 195          
+ 196          /*
+ 197          
+ 198          
+ 199              PWM2_SetPwmWide(0);         //输出全低电平
+ 200              PWM3_SetPwmWide(1);         //输出1/2550高电平
+ 201              PWM4_SetPwmWide(CYCLE);     //输出全高电平
+ 202              PWM5_SetPwmWide(CYCLE-1);   //输出2549/2550低电平
+ 203              
+ 204              PWM6_SetPwmWide(CYCLE/2);   //输出1/2高电平
+ 205              PWM7_SetPwmWide(CYCLE/3);   //输出1/3高电平
+ 206          
+ 207          */
+ 208          
+ 209          
+ 210          void PWM_config(void)
+ 211          {
+ 212   1          /*
+ 213   1          P0M0 &= ~0xc0;
+ 214   1          P0M1 &= ~0xc0;
+ 215   1          P0 &= ~0xc0;                    //设置P0.6/.P0.7电平
+ 216   1          */
+ 217   1        
+ 218   1          P2M0 &= ~0x0e;
+ 219   1          P2M1 &= ~0x0e;
+ 220   1          P2 &= ~0x0e;                    //设置P2.1/P2.2/P2.3电平
+ 221   1        
+ 222   1          P3M0 &= ~0x80;
+ 223   1          P3M1 &= ~0x80;
+ 224   1          P3 &= ~0x80;                    //设置P3.7电平
+ 225   1      
+ 226   1          P_SW2 |= 0x80;
+ 227   1      
+ 228   1          PWMCKS = 0x00;
+ 229   1        
+ 230   1          PWMC = CYCLE;                   //设置PWM周期
+ 231   1        
+ 232   1          PWM2T1 = 1;
+ 233   1          PWM2T2 = 0;
+ 234   1        
+ 235   1          PWM2CR = 0x00;                  //PWM2输出到P3.7
+ 236   1          PWM3T1 = 1;
+ 237   1          PWM3T2 = 0;
+ 238   1          PWM3CR = 0x00;                  //PWM3输出到P2.1
+ 239   1          PWM4T1 = 1;
+ 240   1          PWM4T2 = 0;
+ 241   1          PWM4CR = 0x00;                  //PWM4输出到P2.2
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 5   
+
+ 242   1          PWM5T1 = 1;
+ 243   1          PWM5T2 = 0;
+ 244   1          PWM5CR = 0x00;                  //PWM5输出到P2.3
+ 245   1          
+ 246   1          /*
+ 247   1          PWM6T1 = 1;
+ 248   1          PWM6T2 = 0;
+ 249   1          PWM6CR = 0x08;                  //PWM6输出到P0.7
+ 250   1          PWM7T1 = 1;
+ 251   1          PWM7T2 = 0;
+ 252   1          PWM7CR = 0x08;                  //PWM7输出到P0.6
+ 253   1          */  
+ 254   1          
+ 255   1          PWMCFG = 0x00;                  //配置PWM的输出初始电平
+ 256   1          
+ 257   1          PWMCR = 0x3f;                   //使能PWM信号输出
+ 258   1          
+ 259   1          PWMCR |= 0x80;                  //使能PWM模块
+ 260   1          P_SW2 &= ~0x80;
+ 261   1      }
+ 262          
+ 263          
+ 264          void PWM2_SetPwmWide(u16 Wide)
+ 265          {
+ 266   1          if (Wide == 0)
+ 267   1          {
+ 268   2              PWMCR &= ~0x01;  //关闭归零中断
+ 269   2              PWM2 = 0;
+ 270   2          }
+ 271   1          else if (Wide == CYCLE)
+ 272   1          {
+ 273   2              PWMCR &= ~0x01;  //关闭归零中断
+ 274   2              PWM2 = 1;
+ 275   2          }
+ 276   1          else
+ 277   1          {
+ 278   2              P_SW2 |= 0x80;   //外设功能切换寄存器
+ 279   2              PWM2T1 = Wide;   //设置翻转点
+ 280   2              P_SW2 &= ~0x80;  //外设功能切换
+ 281   2              PWMCR |= 0x01;   //使能中断
+ 282   2          }
+ 283   1      }
+ 284          
+ 285          void PWM3_SetPwmWide(u16 Wide)
+ 286          {
+ 287   1          if (Wide == 0)
+ 288   1          {
+ 289   2              PWMCR &= ~0x02;
+ 290   2              PWM3 = 0;
+ 291   2          }
+ 292   1          else if (Wide == CYCLE)
+ 293   1          {
+ 294   2              PWMCR &= ~0x02;
+ 295   2              PWM3 = 1;
+ 296   2          }
+ 297   1          else
+ 298   1          {
+ 299   2              P_SW2 |= 0x80;
+ 300   2              PWM3T1 = Wide;
+ 301   2              P_SW2 &= ~0x80;
+ 302   2              PWMCR |= 0x02;
+ 303   2          }
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 6   
+
+ 304   1      }
+ 305          
+ 306          void PWM4_SetPwmWide(u16 Wide)
+ 307          {
+ 308   1          if (Wide == 0)
+ 309   1          {
+ 310   2              PWMCR &= ~0x04;
+ 311   2              PWM4 = 0;
+ 312   2          }
+ 313   1          else if (Wide == CYCLE)
+ 314   1          {
+ 315   2              PWMCR &= ~0x04;
+ 316   2              PWM4 = 1;
+ 317   2          }
+ 318   1          else
+ 319   1          {
+ 320   2              P_SW2 |= 0x80;
+ 321   2              PWM4T1 = Wide;
+ 322   2              P_SW2 &= ~0x80;
+ 323   2              PWMCR |= 0x04;
+ 324   2          }
+ 325   1      }
+ 326          
+ 327          void PWM5_SetPwmWide(u16 Wide)
+ 328          {
+ 329   1          if (Wide == 0)
+ 330   1          {
+ 331   2              PWMCR &= ~0x08;
+ 332   2              PWM5 = 0;
+ 333   2          }
+ 334   1          else if (Wide == CYCLE)
+ 335   1          {
+ 336   2              PWMCR &= ~0x08;
+ 337   2              PWM5 = 1;
+ 338   2          }
+ 339   1          else
+ 340   1          {
+ 341   2              P_SW2 |= 0x80;
+ 342   2              PWM5T1 = Wide;
+ 343   2              P_SW2 &= ~0x80;
+ 344   2              PWMCR |= 0x08;
+ 345   2          }
+ 346   1      }
+ 347          /*
+ 348          void PWM6_SetPwmWide(u16 Wide)
+ 349          {
+ 350              if (Wide == 0)
+ 351              {
+ 352                  PWMCR &= ~0x10;
+ 353                  PWM6 = 0;
+ 354              }
+ 355              else if (Wide == CYCLE)
+ 356              {
+ 357                  PWMCR &= ~0x10;
+ 358                  PWM6 = 1;
+ 359              }
+ 360              else
+ 361              {
+ 362                  P_SW2 |= 0x80;
+ 363                  PWM6T1 = Wide;
+ 364                  P_SW2 &= ~0x80;
+ 365                  PWMCR |= 0x10;
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 7   
+
+ 366              }
+ 367          }
+ 368          
+ 369          void PWM7_SetPwmWide(u16 Wide)
+ 370          {
+ 371              if (Wide == 0)
+ 372              {
+ 373                  PWMCR &= ~0x20;
+ 374                  PWM7 = 0;
+ 375              }
+ 376              else if (Wide == CYCLE)
+ 377              {
+ 378                  PWMCR &= ~0x20;
+ 379                  PWM7 = 1;
+ 380              }
+ 381              else
+ 382              {
+ 383                  P_SW2 |= 0x80;
+ 384                  PWM7T1 = Wide;
+ 385                  P_SW2 &= ~0x80;
+ 386                  PWMCR |= 0x20;
+ 387              }
+ 388          }
+ 389          */
+ 390          // 电机2驱动
+ 391          /********************************************************************
+ 392          函数功能：电机2正转
+ 393          入口参数：无。
+ 394          返    回：无。
+ 395          备    注：无。
+ 396          ********************************************************************/
+ 397          /*
+ 398          void MotoDc2Forward(void)
+ 399          {
+ 400             MOTO2_IN3On();
+ 401             MOTO2_IN4Off();
+ 402          }
+ 403          */
+ 404          /********************************************************************
+ 405          函数功能：电机2反转
+ 406          入口参数：无。
+ 407          返    回：无。
+ 408          备    注：无。
+ 409          ********************************************************************/
+ 410          /*
+ 411          void MotoDc2Reverse(void)
+ 412          {
+ 413             MOTO2_IN3Off();
+ 414             MOTO2_IN4On();
+ 415          }
+ 416           */
+ 417          /********************************************************************
+ 418          函数功能：电机2停止
+ 419          入口参数：无。
+ 420          返    回：无。
+ 421          备    注：无。
+ 422          ********************************************************************/
+ 423          void MotoDc2Stop(void)
+ 424          {  
+ 425   1         DC2Run=0;
+ 426   1         MOTO_DC2_Run_Time=0;
+ 427   1         MOTO2_IN3Off();
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 8   
+
+ 428   1         MOTO2_IN4Off();  
+ 429   1         PWM4_SetPwmWide(0);     //输出全低电平
+ 430   1         PWM5_SetPwmWide(0);     //输出低电平 
+ 431   1      }
+ 432           
+ 433          
+ 434          //以下为PWM 控制 电机驱动
+ 435          
+ 436          
+ 437          
+ 438          
+ 439          /********************************************************************
+ 440          函数功能：电机1 pwm 控制
+ 441          入口参数：无。 占空比  方向
+ 442          返    回：无。
+ 443          备    注：无。
+ 444          ********************************************************************/
+ 445          void MotoDc1Run(u8 time, u8 direction , u8 runtime)
+ 446          {
+ 447   1         DC1Run=1;   //置电机运行标志 
+ 448   1         MOTO_DC1_Run_Time=runtime;   //运行时间
+ 449   1         PWM1time=time; //赋占空比值
+ 450   1         PWMDC1Direction=direction; //方向
+ 451   1        
+ 452   1        if(PWMDC1Direction==1) //正转
+ 453   1        {
+ 454   2            if(time==100)
+ 455   2            {
+ 456   3              PWM2_SetPwmWide(CYCLE);     //占空比输出
+ 457   3              PWM3_SetPwmWide(0);             //输出低电平
+ 458   3      
+ 459   3            }
+ 460   2            else
+ 461   2            { 
+ 462   3              PWM2_SetPwmWide(PWM1time);           //占空比输出
+ 463   3              PWM3_SetPwmWide(0);             //输出低电平
+ 464   3            } 
+ 465   2            
+ 466   2          
+ 467   2      
+ 468   2        }
+ 469   1      
+ 470   1        if(PWMDC1Direction==0) //反转
+ 471   1        {
+ 472   2             if(time==100)
+ 473   2            {
+ 474   3              PWM3_SetPwmWide(CYCLE);     //占空比输出
+ 475   3              PWM2_SetPwmWide(0);             //输出低电平
+ 476   3            }
+ 477   2            else
+ 478   2            {       
+ 479   3              PWM3_SetPwmWide(PWM1time);           //占空比输出
+ 480   3              PWM2_SetPwmWide(0);             //输出低电平     
+ 481   3            } 
+ 482   2        }
+ 483   1        
+ 484   1      }
+ 485          
+ 486          
+ 487          /********************************************************************
+ 488          函数功能：电机1 pwm 控制
+ 489          入口参数：无。 占空比  方向
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 9   
+
+ 490          返    回：无。 32<time<=100
+ 491          备    注：无。
+ 492          ********************************************************************/
+ 493          void MotoDc2Run(u8 time, u8 direction ,u8 runtime)
+ 494          {
+ 495   1         DC2Run=1;   //置电机运行标志
+ 496   1         MOTO_DC2_Run_Time=runtime; //运行时间
+ 497   1        
+ 498   1         PWM2time=time; //赋 占空比值
+ 499   1        
+ 500   1         PWMDC2Direction=direction;
+ 501   1        
+ 502   1        if(PWMDC2Direction==1) //正转
+ 503   1        {
+ 504   2             if(time==100)
+ 505   2            {
+ 506   3              PWM5_SetPwmWide(CYCLE);     //占空比输出
+ 507   3              PWM4_SetPwmWide(0);             //输出低电平
+ 508   3            }
+ 509   2            else
+ 510   2            {       
+ 511   3              PWM5_SetPwmWide(PWM2time);           //占空比输出
+ 512   3              PWM4_SetPwmWide(0);             //输出低电平     
+ 513   3            } 
+ 514   2        }
+ 515   1        
+ 516   1          if(PWMDC2Direction==0) //反转
+ 517   1        {
+ 518   2             if(time==100)
+ 519   2            {
+ 520   3              PWM4_SetPwmWide(CYCLE);     //占空比输出
+ 521   3              PWM5_SetPwmWide(0);             //输出低电平
+ 522   3            }
+ 523   2            else
+ 524   2            {       
+ 525   3              PWM4_SetPwmWide(PWM2time);           //占空比输出
+ 526   3              PWM5_SetPwmWide(0);             //输出低电平     
+ 527   3            } 
+ 528   2        }
+ 529   1      
+ 530   1        
+ 531   1      }
+ 532          
+ 533          
+ 534          /********************************************************************
+ 535          函数功能：出片通道控制函数
+ 536          入口参数：无。
+ 537          返    回：无。
+ 538          备    注：无。
+ 539          ********************************************************************/
+ 540          
+ 541          
+ 542          // 电机1为传动电机
+ 543          // 电机2为离合电机
+ 544          
+ 545          //离合电机开关控制
+ 546          /********************************************************************
+ 547          函数功能：离合电机开关控制
+ 548          入口参数：TYPE   TYPE =1  OPEN  TYPE =0  CLOSE 
+ 549          返    回：无。 
+ 550          备    注：无。
+ 551          ********************************************************************/
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 10  
+
+ 552          void Moto_DC2_Control(u8 TYPE )
+ 553          {
+ 554   1         //开电机2 置离合关标志。
+ 555   1         MotoDc2Run(30,1,10); //离合电机运行10S 
+ 556   1          // MotoDc2Run(20,1,10); //离合电机运行10S     //  转速太快，离合关闭的时候 夹不紧
+ 557   1      
+ 558   1         //离合到位后定时器关闭电机2
+ 559   1         MOTO2_LH_Control=1;  //1 需要进行离合控制
+ 560   1         MOTO2_LH_Flag=TYPE;  //离合控制类型 1 开 松开 ，0 关加紧
+ 561   1      }
+ 562          
+ 563          //胶片输送控制程序
+ 564          /********************************************************************
+ 565          函数功能：胶片输送控制程序
+ 566          入口参数：无
+ 567          返    回：无。 
+ 568          备    注：无。
+ 569          ********************************************************************/
+ 570          u8  test=0xFF;
+ 571          u8  sensed_time=0;    //卡片再送一次
+ 572          
+ 573          void Moto_control_sys(void)
+ 574          {
+ 575   1      
+ 576   1        u8  Sensor_P0_TMP;  //临时变量，读取切刀位置
+ 577   1        u8  Sensor_P1_TMP;  //临时变量，读取切刀位置
+ 578   1        
+ 579   1        
+ 580   1        WDT_CONTR |= 0x10;      //喂狗
+ 581   1      
+ 582   1        Sensor_P0_TMP=MOTO_S8S0();  //再次读切刀状态   不能改变中断中   
+ 583   1        Sensor_P1_TMP=MOTO_S7S1();   //再次读切刀状态 
+ 584   1        Sensor_P2_new_state=MOTO_S6S2();   //读胶片是否在输送口状态  
+ 585   1        
+ 586   1      /* 
+ 587   1        uart1senddata(&DC2_Run_Time_count,4);//1  
+ 588   1        uart1senddata(&Sensor_P0_flag,1);//1
+ 589   1        uart1senddata(&Sensor_P1_flag,1);//1  
+ 590   1        uart1senddata(&Sensor_P2_new_state,1);//1 
+ 591   1        uart1senddata(&Paper_Send_Flag1,1);//1  
+ 592   1        uart1senddata(&Paper_Send_Flag2,1);//1  
+ 593   1        uart1senddata(&Paper_Send_OK,1);//1
+ 594   1        
+ 595   1      
+ 596   1        uart1senddata(&Sensor_P2_f10,1);//1
+ 597   1        uart1senddata(&Sensor_P2_Moto_Stop_flag,1);//1
+ 598   1        
+ 599   1        */
+ 600   1        
+ 601   1        if( (Sensor_P0_TMP==1 ) && (Sensor_P1_TMP==0)) //切刀已经归位
+ 602   1        {
+ 603   2            if( (Sensor_P1_flag==1) && (Sensor_P0_flag==1) ) //发生了切刀动作
+ 604   2            { 
+ 605   3              
+ 606   3              Sensor_P2_new_state=MOTO_S6S2();   //读胶片是否在输送口状态  
+ 607   3              
+ 608   3              if((Sensor_P2_new_state==0)|| (Paper_Send_Flag1==1) || (Paper_Send_Flag2==1))  //胶片到达通道口,或者处
+             -于第一阶段，或者处于第二阶段
+ 609   3              {
+ 610   4                
+ 611   4                    //test=0xFF;
+ 612   4                    //uart1senddata(&test,1);//1          
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 11  
+
+ 613   4                    //送片第一阶段 关离合 加热 
+ 614   4                    if(Paper_Send_Flag1==0)
+ 615   4                    { 
+ 616   5                      // test=0xEE;
+ 617   5                      // uart1senddata(&test,1);//1
+ 618   5                      
+ 619   5                         Paper_Send_OK=2;     //开始出片，清出片成功标志
+ 620   5                       
+ 621   5                         Sensor_P5_flag_start=1 ; //需要检测出片口传感器  
+ 622   5                      
+ 623   5                      
+ 624   5                         Paper_Send_Flag1=1;  //置位 表示已经进行了加热控制 
+ 625   5                      
+ 626   5                         Heat_Time_Flag_start=1;  //加热等待时间计数
+ 627   5                      
+ 628   5                        //   MotoDc1Run(80,FORWARD,1); //60占空比 正转 25S   慢转   
+ 629   5                      
+ 630   5                       // Sensor_P6_cont_start=1;  //行程码盘计数开始  --注释掉，表示不等待加热时间
+ 631   5                      
+ 632   5                       //关离合
+ 633   5                       Moto_DC2_Control(0);     // 离合电机关
+ 634   5              
+ 635   5                      //不加热等待
+ 636   5                      // Heat_Time_Flag=1;   
+ 637   5                      
+ 638   5                    } 
+ 639   4        
+ 640   4        
+ 641   4                    //判断胶片是否到了预定的加热位置，到了停止电机  
+ 642   4                     if(Sensor_P6_flag==1) //后半段加热输送距离
+ 643   4                     {             
+ 644   5                       MotoDc1Stop();           //停止电机 
+ 645   5                       Sensor_P6_cont_start=0;  //清标志
+ 646   5                       Sensor_P6_flag_cont=0;   //清计数器   
+ 647   5                       Sensor_P6_flag=0;        //清标志 
+ 648   5                     }  
+ 649   4      
+ 650   4                 
+ 651   4                    //第二阶段  输送胶片
+ 652   4                    if(Paper_Send_Flag2==0)
+ 653   4                    {             
+ 654   5                       //加热完毕 输送胶片
+ 655   5                       if(Heat_Time_Flag==1)  //判断加热是否完成
+ 656   5                       { 
+ 657   6                         
+ 658   6                          Paper_Send_OK=2;     //开始出片，清出片成功标志
+ 659   6                         
+ 660   6                          Paper_Send_Flag2=1;  //第二阶段置位标志 
+ 661   6                         
+ 662   6                          Heat_Time_Flag_start=0;  //关加热计时开始标志
+ 663   6                         
+ 664   6                         // Heat_Time_Flag=0;        //清加热完成标志 
+ 665   6                         
+ 666   6                         //胶片停留加热时间完毕，送出胶片
+ 667   6                         
+ 668   6                          MotoDc1Run(100,FORWARD,15); //100占空比 正转15S     全速
+ 669   6                          
+ 670   6                        // 
+ 671   6                         
+ 672   6                         SendPaper_P6_Time_Flag_start=1;  //超时码盘计数   
+ 673   6                         
+ 674   6                       }
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 12  
+
+ 675   5                     
+ 676   5                     }
+ 677   4                    
+ 678   4                     //胶片正常输出
+ 679   4                     if(Sensor_P5_flag==1)
+ 680   4                     { 
+ 681   5                        SendPaper_P6_Time_Flag_start=0;  //关计数标志
+ 682   5                        Sensor_P6_SendPaper_flag=0;  // 清标志
+ 683   5                        Sensor_P5_flag=0;      //清标志
+ 684   5                        
+ 685   5                        //MotoDc1Run(100,FORWARD,1); //过了传感器再转一秒钟  保证完全出来
+ 686   5                        MotoDc1Stop();
+ 687   5                        //开离合
+ 688   5                        Moto_DC2_Control(1);      // 离合电机开
+ 689   5                       
+ 690   5                        Paper_Send_OK=0x00;       //置位出片成功标志  
+ 691   5                       
+ 692   5                       //就绪计数开始标志
+ 693   5                       
+ 694   5                        JiuXu_Count=0;    //清就绪计数器
+ 695   5                       
+ 696   5                        JiuXu_Count_start=1;  //置就绪计数开始标志
+ 697   5                       
+ 698   5                        sensed_time=0 ;
+ 699   5                        
+ 700   5                        Heat_Time_Flag=0;        //清加热完成标志 
+ 701   5      
+ 702   5                        Sensor_P1_flag=0;      //清切刀标志
+ 703   5                        Sensor_P0_flag=0;      //清切刀标志        
+ 704   5                        Paper_Send_Flag1=0;    //清第一阶段标志
+ 705   5                        Paper_Send_Flag2=0;    //清第二阶段标志
+ 706   5                        Sensor_P5_flag_start=0 ; //清出片口检测标志
+ 707   5                        Sensor_P6_SendPaper_flag=0; 
+ 708   5                        Sensor_P6_SendPaper_flag_cont=0; //
+ 709   5                        SendPaper_P6_Time_Flag_start=0;//送片超时码盘计数  
+ 710   5                        
+ 711   5                        Sensor_P2_Moto_Stop_flag=0;
+ 712   5                        
+ 713   5                        //关加热  
+ 714   5                      //  HeatOff();     //开启加热
+ 715   5                       
+ 716   5                     } //正常出片
+ 717   4                  
+ 718   4                       
+ 719   4                     if(Sensor_P6_SendPaper_flag==1) //码盘计数超时，表示卡片
+ 720   4                     {
+ 721   5                       
+ 722   5                         Sensor_P6_SendPaper_flag=0;       
+ 723   5                         // Paper_Send_OK=0x05;  //表示卡片                        
+ 724   5                         // MotoDc1Stop();  //停止电机 
+ 725   5                         // 一般情况下卡片是因为离合电机没有加紧
+ 726   5                         //卡片容错处理一次                    
+ 727   5                         if(sensed_time==0x01)  //报卡片
+ 728   5                         {
+ 729   6                           
+ 730   6                              Heat_Time_Flag=0;        //清加热完成标志 
+ 731   6                           
+ 732   6                              SendPaper_P6_Time_Flag_start=0;  
+ 733   6                         
+ 734   6                              Sensor_P6_SendPaper_flag=0; 
+ 735   6                         
+ 736   6                              SendPaper_Time_Flag_start=0;    
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 13  
+
+ 737   6                         
+ 738   6                              Sensor_P6_SendPaper_flag_cont=0;
+ 739   6      
+ 740   6                              Paper_Send_OK=3;  //表示卡片  
+ 741   6                              
+ 742   6                              //关加热
+ 743   6                              HeatOff();     //开启加热
+ 744   6                           
+ 745   6                         }
+ 746   5                         
+ 747   5                         //关离合
+ 748   5                         if(sensed_time==0x00)
+ 749   5                         {
+ 750   6                             sensed_time=0x01;
+ 751   6                             Moto_DC2_Control(0);     // 离合电机关    
+ 752   6                             Paper_Send_Flag2=0 ; //置标志 再送一次纸张
+ 753   6                         }  
+ 754   5                       
+ 755   5                      } //en  卡片处理
+ 756   4                      
+ 757   4                     
+ 758   4                     //卡片后处理
+ 759   4                     if(Paper_Send_OK==3)
+ 760   4                     {
+ 761   5                        //人工干预取片 之后清除相关标志
+ 762   5                         if(Sensor_P2_new_state==1)    //入口无胶片 自动清除卡片标志  //如果卡片在中间，第二张继续打还是
+             -会卡在下面。两张一起清除
+ 763   5                         {                  
+ 764   6                            SendPaper_P6_Time_Flag_start=0;  //关计数标志
+ 765   6                            Sensor_P6_SendPaper_flag=0;  // 清标志
+ 766   6                           
+ 767   6                            Sensor_P5_flag=0;      //清标志
+ 768   6                            MotoDc1Stop();         //停止电机   
+ 769   6                            //开离合
+ 770   6                            Moto_DC2_Control(1);      // 离合电机开      
+ 771   6                            Paper_Send_OK=0x01;       //清除之后变为就绪
+ 772   6                           //就绪计数开始标志 
+ 773   6                            JiuXu_Count=0;    //清就绪计数器
+ 774   6                            JiuXu_Count_start=1;  //置就绪计数开始标志  
+ 775   6                            sensed_time=0 ;  
+ 776   6                            Heat_Time_Flag=0;        //清加热完成标志  
+ 777   6                            Sensor_P1_flag=0;      //清切刀标志
+ 778   6                            Sensor_P0_flag=0;      //清切刀标志        
+ 779   6                            Paper_Send_Flag1=0;    //清第一阶段标志
+ 780   6                            Paper_Send_Flag2=0;    //清第二阶段标志
+ 781   6                            Sensor_P5_flag_start=0 ; //清出片口检测标志
+ 782   6                            Sensor_P6_SendPaper_flag=0; 
+ 783   6                            Sensor_P6_SendPaper_flag_cont=0; //
+ 784   6                            SendPaper_P6_Time_Flag_start=0;//送片超时码盘计数    
+ 785   6                            
+ 786   6                            HeatFanOff(); //关加热风扇
+ 787   6                       }   
+ 788   5                     }
+ 789   4                     
+ 790   4                     
+ 791   4              }  //有胶片 ，第一阶段，第二阶段
+ 792   3            } //end P0  P1  切刀动作
+ 793   2        } //end P0  P1  切刀归位
+ 794   1        
+ 795   1        //有胶片无切刀  慢转
+ 796   1        if((Sensor_P2_new_state==0)&&(Sensor_P1_flag==0)&&(Sensor_P0_flag==0))  //胶片到达通道口，无切刀动作
+ 797   1        {   
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 14  
+
+ 798   2          if(Sensor_P2_Moto_Stop_flag==0)
+ 799   2          { 
+ 800   3                //防止再切刀切完没有归位的过程中带走胶片造成报错    
+ 801   3              if( (Sensor_P0_TMP==1 ) && (Sensor_P1_TMP==0)) //切刀已经归位
+ 802   3              { 
+ 803   4                    MotoDc1Run(60,FORWARD,1); //50占空比
+ 804   4              } 
+ 805   3              
+ 806   3                  //有胶片 开加热
+ 807   3              HeatFanOn();  // 开启加热风扇
+ 808   3            //  HeatOn();     //开启加热        
+ 809   3              
+ 810   3          } 
+ 811   2          
+ 812   2           if(Sensor_P2_Moto_Stop_flag==1)
+ 813   2          {           
+ 814   3              HeatFanOff();  // 开启加热风扇
+ 815   3            //  HeatOff();     //开启加热       
+ 816   3              
+ 817   3          } 
+ 818   2          
+ 819   2      
+ 820   2        
+ 821   2        }
+ 822   1        
+ 823   1      } //end  Moto_control_sys
+ 824          
+ 825          
+ 826          void Auto_Send_Paper_a4(void)
+ 827          {
+ 828   1        
+ 829   1        if(MOTO_S1S7()==0)  //清超时标志
+ 830   1        {
+ 831   2          auto_paper_a4_Max_Flag=0;
+ 832   2        } 
+ 833   1        
+ 834   1        
+ 835   1        if(auto_paper_a4_Max_Flag==0)  //不超时
+ 836   1        {
+ 837   2            if(MOTO_S1S7()==1)
+ 838   2            {
+ 839   3              auto_paper_a4_Count_Flag=1;
+ 840   3              //开导光灯---报告电机
+ 841   3               BaoGaoLedOn();
+ 842   3            } 
+ 843   2            
+ 844   2            if(MOTO_S1S7()==0)
+ 845   2            {
+ 846   3              if(auto_paper_a4_Count_Flag==0)
+ 847   3              {
+ 848   4                 BaoGaoLedOff();
+ 849   4              }
+ 850   3            }
+ 851   2         
+ 852   2         }
+ 853   1      
+ 854   1      }
+ 855          
+ 856          
+ 857          /**********************************END Moto_control_sys*************************************/
+ 858          
+ 859          
+C51 COMPILER V9.52.0.0   MOTO                                                              12/05/2016 09:37:57 PAGE 15  
+
+ 860          
+ 861          
+ 862          
+ 863          
+ 864          
+ 865          
+ 866          
+ 867          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1070    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =     79       5
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

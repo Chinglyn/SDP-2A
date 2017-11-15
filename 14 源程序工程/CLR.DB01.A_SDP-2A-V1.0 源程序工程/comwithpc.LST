@@ -1,0 +1,1443 @@
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE COMWITHPC
+OBJECT MODULE PLACED IN comwithpc.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE comwithpc.c COMPACT BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          /************************************************************************************
+   2          *
+   3          * CPU：STC15W4K3S4核心板
+   4          * 时钟选择：外部时钟11.0592MHz
+   5          * 功能说明：与上位机通信程序
+   6          * 作者信息：张 斌
+   7          *************************************************************************************
+   8          *按照通信协议，与上位机通信
+   9          *
+  10          *
+  11          ************************************************************************************/
+  12          
+  13          #include "stc15w4k32s4.h"
+  14          #include "unit.h"
+  15          #include "harddrive.h"
+  16          #include "uart1.h"
+  17          #include "moto.h"
+  18          #include "comwithpc.h"
+  19          
+  20          //接收数据在串口中断进行，此处只对接收到的数据进行处理
+  21          //使用到的外部变量
+  22          //extern volatile u8 uart1SendingFlag;      //全局变量，串口是否有数据要发送标志
+  23          
+  24          extern volatile u8 uart1ReceivedFlag;   //全局变量，标志串口已接收到数据
+  25          
+  26          extern volatile u8 uart1ReceiveNum;     //全局变量，标志串口已接收到数据计数
+  27          
+  28          extern volatile u8 uart1SBuf[UART1_RBUFSIZE];//发送缓冲区，static标识，只在本文件中可以访问
+  29          
+  30          extern volatile u8 uart1rBuf[UART1_RBUFSIZE];//接收缓冲区，static标识，只在本文件中可以访问
+  31          
+  32          extern volatile u8 Paper_Send_OK;   //卡片标志
+  33          
+  34          extern volatile s16 Heart_Open;   //开启心跳标志
+  35          extern volatile u8  Heart_flag;   //无心跳标志
+  36          extern volatile u32 Heart_Count;  //心跳超时计数
+  37          
+  38          
+  39          extern u8 IPF510MT_PB;
+  40          extern u8 C7280MT_PB;
+  41          //废墨检测
+  42          extern u8 IPF510FM_PB;
+  43          extern u8 C7280FM_PB;
+  44          
+  45          
+  46          /**************************************************************************
+  47          *校验函数，按照通信协议计算校验位返回校验位的值
+  48          *
+  49          *输入：需要计算数据的首地址，数据长度
+  50          *输出：校验值
+  51          *
+  52          ***************************************************************************/
+  53          
+  54          u8 CRC_value(u8 *p,u8 n)
+  55          {
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 2   
+
+  56   1        u8 num1=0,num0=0;
+  57   1        u8 value0=0;
+  58   1        for(num1=n;num1>0;num1--)        
+  59   1        {
+  60   2          num0+=*p++;
+  61   2        }
+  62   1        value0=num0%256;
+  63   1        return value0;
+  64   1      }
+  65          
+  66          //生成返回的数据包
+  67          //{0x55,0x05,0x00,0x00,0x00,0xfe,0x02,0x01,0xff,0xff,0x00,0xff,0xff,0x0d};  
+  68          /**************************************************************************
+  69          *校验函数，按照通信协议计算校验位返回校验位的值
+  70          *
+  71          *输入：数据域长度低位  ，数据长度高位 ，功能码,子功能码 
+  72          *输出：校验值
+  73          *
+  74          ***************************************************************************/
+  75          
+  76          void make_data_bus(u8 datal,u8 datah)
+  77          {
+  78   1        u8 i;
+  79   1        
+  80   1        uart1SBuf[0]=DATAHEAD;
+  81   1        
+  82   1        uart1SBuf[1]=datal; //数据域长度低位
+  83   1        
+  84   1        uart1SBuf[2]=datah; //数据长度高位
+  85   1        
+  86   1        uart1SBuf[3]=ADDRESSL; //同类板地址L
+  87   1        
+  88   1        uart1SBuf[4]=ADDRESSH; //同类板地址H
+  89   1        
+  90   1        uart1SBuf[5]=DATADIR; //传送方向
+  91   1        
+  92   1        uart1SBuf[6]=uart1rBuf[6]; //功能码
+  93   1        
+  94   1        for(i=0;i<4;i++)
+  95   1        {
+  96   2          uart1SBuf[7+i]=uart1rBuf[7+i]; //子功能码 数据域第一个字节
+  97   2        }
+  98   1        
+  99   1        uart1SBuf[(7+datal+datah+1)]=DATAEND; //结束符
+ 100   1        
+ 101   1      }
+ 102          
+ 103          extern volatile s16 temputer1;
+ 104          extern volatile s16 temputer2;
+ 105          
+ 106          u8 sys_init_state=1; //初始化状态标志
+ 107          
+ 108          void comwithpc(void)
+ 109          {
+ 110   1          u8  CRC;  //用于计算校验位
+ 111   1        
+ 112   1          WDT_CONTR |= 0x10;      //喂狗
+ 113   1        
+ 114   1        if(uart1ReceivedFlag==1)  //接收到数据才进行处理
+ 115   1        {
+ 116   2          
+ 117   2          if( (uart1rBuf[0]==0x55)&&(uart1rBuf[5]==0xFF) && (uart1rBuf[uart1ReceiveNum-1]==0x0d) )//判断首尾位以及
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 3   
+
+             -方向字节是否正确  
+ 118   2          {
+ 119   3            //正确之后才计算校验位
+ 120   3            CRC=CRC_value(uart1rBuf,uart1ReceiveNum-2);
+ 121   3            
+ 122   3            if(CRC==uart1rBuf[uart1ReceiveNum-2])  //校验正确后对数据进行处理
+ 123   3            {
+ 124   4              //uart1senddata(uart1rBuf,uart1rBuf[uart1ReceiveNum-1]);//2
+ 125   4              
+ 126   4              switch(uart1rBuf[6]) //对功能码进行分支处理
+ 127   4              {         
+ 128   5                case 0x00 :   
+ 129   5                
+ 130   5                //未知指令
+ 131   5                 make_data_bus(0x05,0x00);    
+ 132   5                 uart1SBuf[6]=0xFF; //功能码    
+ 133   5                 uart1SBuf[7]=0x00;//功能码 
+ 134   5                 uart1SBuf[8]=0x00;//功能码 
+ 135   5                 uart1SBuf[9]=0x00;//功能码 
+ 136   5                 uart1SBuf[10]=0x00;//功能码            
+ 137   5                 uart1SBuf[11]=OTHERERROR;  // 
+ 138   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 139   5                 uart1senddata(uart1SBuf,14);         
+ 140   5          
+ 141   5                  break;
+ 142   5                  
+ 143   5                //心跳检测
+ 144   5                case 0x06 :
+ 145   5                  
+ 146   5                   switch(uart1rBuf[9])
+ 147   5                   {
+ 148   6                      //检测
+ 149   6                      case 0x01 :
+ 150   6                        
+ 151   6                       //开启器心跳检测
+ 152   6                        Heart_Open=1;
+ 153   6                        Heart_Count=0;  //心跳喂狗
+ 154   6                        Heart_flag=1;
+ 155   6                        
+ 156   6                        make_data_bus(0x05,0x00);
+ 157   6                      
+ 158   6                        uart1SBuf[11]=0x00;  // 0表示成功
+ 159   6                        //计算校验
+ 160   6                        uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 161   6                        
+ 162   6                        uart1senddata(uart1SBuf,14);
+ 163   6                       break; 
+ 164   6                      
+ 165   6                      //屏蔽
+ 166   6                      case 0x02 :
+ 167   6                        
+ 168   6                        //关闭心跳检测
+ 169   6                        Heart_Open=0;
+ 170   6                      
+ 171   6                        Heart_Count=0;  //心跳喂狗
+ 172   6                       
+ 173   6                        Heart_flag=1;  //清标志
+ 174   6                        
+ 175   6                        make_data_bus(0x05,0x00);
+ 176   6                        uart1SBuf[11]=0x00;  // 0表示成功
+ 177   6                        //计算校验
+ 178   6                        uart1SBuf[12]=CRC_value(uart1SBuf,12);      
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 4   
+
+ 179   6                        uart1senddata(uart1SBuf,14);
+ 180   6                        
+ 181   6                       break; 
+ 182   6        
+ 183   6                      default :
+ 184   6                        
+ 185   6                       //未知指令
+ 186   6                       make_data_bus(0x05,0x00);    
+ 187   6                       uart1SBuf[6]=0xFF; //功能码    
+ 188   6                       uart1SBuf[7]=0x00;//功能码 
+ 189   6                       uart1SBuf[8]=0x00;//功能码 
+ 190   6                       uart1SBuf[9]=0x00;//功能码 
+ 191   6                       uart1SBuf[10]=0x00;//功能码            
+ 192   6                       uart1SBuf[11]=OTHERERROR;  // 
+ 193   6                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 194   6                       uart1senddata(uart1SBuf,14);
+ 195   6                        
+ 196   6                       break;
+ 197   6      
+ 198   6      
+ 199   6                     }
+ 200   5                  
+ 201   5                  break;
+ 202   5                    
+ 203   5                //系统复位
+ 204   5                
+ 205   5                //55 04 00 00 00 FF 04 02 02 00 00 60 0D
+ 206   5                
+ 207   5                case 0x04 :
+ 208   5                  
+ 209   5                  if(uart1rBuf[7]==0x02)
+ 210   5                  {
+ 211   6      
+ 212   6                   make_data_bus(0x05,0x00);    
+ 213   6      
+ 214   6                   uart1SBuf[11]=0x00;  // 0表示成功
+ 215   6                            //计算校验
+ 216   6                   uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 217   6                
+ 218   6                   uart1senddata(uart1SBuf,14); 
+ 219   6        
+ 220   6                   IAP_CONTR= 0x20 ;  //系统软件复位
+ 221   6                 }
+ 222   5      
+ 223   5                  break;
+ 224   5                   
+ 225   5                 //清除卡纸状态
+ 226   5                 case 0x07 :
+ 227   5                  
+ 228   5                  if(uart1rBuf[7]==0x01)
+ 229   5                  {
+ 230   6                   make_data_bus(0x05,0x00);                
+ 231   6                   Paper_Send_OK=1;     //清状态为就绪    
+ 232   6                   uart1SBuf[11]=0x00;  // 0表示成功
+ 233   6                            //计算校验
+ 234   6                   uart1SBuf[12]=CRC_value(uart1SBuf,12);       
+ 235   6                   uart1senddata(uart1SBuf,14); 
+ 236   6                  }
+ 237   5      
+ 238   5                  break;
+ 239   5                 
+ 240   5                  
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 5   
+
+ 241   5                //查询数据
+ 242   5                case 0x01 :
+ 243   5                  
+ 244   5                   switch(uart1rBuf[7])
+ 245   5                   {
+ 246   6                      //55 04 00 00 00 FF 01 01 00 00 00 5A 0D
+ 247   6                      //55 08 00 00 00 FE 01 01 00 00 00 00 03 10 10 00 00 
+ 248   6                      //查询 版本
+ 249   6                      case 0x01 :
+ 250   6                        make_data_bus(0x08,0x00);
+ 251   6                      
+ 252   6                        uart1SBuf[11]=HARDVER1;  //
+ 253   6                        uart1SBuf[12]=HARDVER2;  //
+ 254   6                        uart1SBuf[13]=FIREVER;   //
+ 255   6                        uart1SBuf[14]=SOFTVER;   //
+ 256   6                        //计算校验
+ 257   6                        uart1SBuf[15]=CRC_value(uart1SBuf,15);
+ 258   6                        
+ 259   6                       uart1senddata(uart1SBuf,17);
+ 260   6                       break; 
+ 261   6                      
+ 262   6                       //查询 纸盒状态
+ 263   6                      case 0x02 :
+ 264   6                        
+ 265   6                        switch(uart1rBuf[8]) //条件分支，  02---7280
+ 266   6                          {
+ 267   7                            
+ 268   7                            case 0x01 :
+ 269   7                              
+ 270   7                               break; 
+ 271   7                            
+ 272   7                            //7280
+ 273   7                            case 0x02 :
+ 274   7                              
+ 275   7                            make_data_bus(0x06,0x00);
+ 276   7                            
+ 277   7                            uart1SBuf[11]=0x01;  // 表示1 个纸盒
+ 278   7                            
+ 279   7                            uart1SBuf[12]=0x01;  // 00000001 表示无纸张
+ 280   7                            
+ 281   7                            //无纸低，有纸高
+ 282   7                            
+ 283   7                            if(MOTO_S1S7()==1)
+ 284   7                            {
+ 285   8                              uart1SBuf[12]=0x00; //返回表示有纸张
+ 286   8                            } 
+ 287   7                            
+ 288   7                            uart1SBuf[13]=CRC_value(uart1SBuf,13);  
+ 289   7                            uart1senddata(uart1SBuf,15);  
+ 290   7                            
+ 291   7                               break; 
+ 292   7                          }
+ 293   6                         break;   
+ 294   6                      
+ 295   6                      
+ 296   6                      //查询墨盒状态
+ 297   6                      case 03 :
+ 298   6                        
+ 299   6                          switch(uart1rBuf[8]) //条件分支，02 --7280  03---510
+ 300   6                          {
+ 301   7                            
+ 302   7                            case 0x03 :
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 6   
+
+ 303   7                                
+ 304   7                            make_data_bus(0x06,0x00); 
+ 305   7                            
+ 306   7                            uart1SBuf[11]=0x05;  // 表示5 个墨盒   位顺序 C  M Y BK  MBK 
+ 307   7                            
+ 308   7                            uart1SBuf[12]=0x00;
+ 309   7                            
+ 310   7                          //  判断是否启用了检测功能
+ 311   7                           if(IPF510MT_PB==0x02)  //如果屏蔽将不检测 直接上报 0x00
+ 312   7                            {
+ 313   8      
+ 314   8                                if(ReadIpf510_MBK()==1)
+ 315   8                                {
+ 316   9                                  uart1SBuf[12]=uart1SBuf[12]|0x10;
+ 317   9                                } 
+ 318   8                                
+ 319   8                                
+ 320   8                                if(ReadIpf510_BK()==1)
+ 321   8                                {
+ 322   9                                  uart1SBuf[12]=uart1SBuf[12]|0x08;
+ 323   9                                } 
+ 324   8                                
+ 325   8                                if(ReadIpf510_Y()==1)
+ 326   8                                {
+ 327   9                                  uart1SBuf[12]=uart1SBuf[12]|0x04;
+ 328   9                                }   
+ 329   8                                
+ 330   8                                if(ReadIpf510_M()==1)
+ 331   8                                {
+ 332   9                                  uart1SBuf[12]=uart1SBuf[12]|0x02;
+ 333   9                                
+ 334   9                                } 
+ 335   8                                
+ 336   8                                if(ReadIpf510_C()==1)
+ 337   8                                {
+ 338   9                                  uart1SBuf[12]=uart1SBuf[12]|0x01;
+ 339   9                                  
+ 340   9                                } 
+ 341   8                            
+ 342   8                            } 
+ 343   7                            
+ 344   7                            uart1SBuf[13]=CRC_value(uart1SBuf,13);
+ 345   7                            uart1senddata(uart1SBuf,15);  
+ 346   7                                    
+ 347   7                            break;
+ 348   7                            
+ 349   7                            case 0x02 :
+ 350   7                              
+ 351   7                            make_data_bus(0x06,0x00); 
+ 352   7                            
+ 353   7                            uart1SBuf[11]=0x05;  // 表示5 个墨盒   位顺序 C  M Y BK  MBK 
+ 354   7                            
+ 355   7                            uart1SBuf[12]=0x00;  //默认为有墨
+ 356   7                            
+ 357   7                            //判断是否启用了检测功能
+ 358   7                            if(C7280MT_PB==0x02)  //如果屏蔽将不检测 直接上报 0x00
+ 359   7                            {
+ 360   8                            
+ 361   8                              if(Read7280_MBK()==1)
+ 362   8                              {
+ 363   9                                uart1SBuf[12]=uart1SBuf[12]|0x10;
+ 364   9                              } 
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 7   
+
+ 365   8                              if(Read7280_BK()==1)
+ 366   8                              {
+ 367   9                                uart1SBuf[12]=uart1SBuf[12]|0x08;
+ 368   9                              } 
+ 369   8                              if(Read7280_Y()==1)
+ 370   8                              {
+ 371   9                                uart1SBuf[12]=uart1SBuf[12]|0x04;
+ 372   9                              } 
+ 373   8                              if(Read7280_M()==1)
+ 374   8                              {
+ 375   9                                uart1SBuf[12]=uart1SBuf[12]|0x02;
+ 376   9                              } 
+ 377   8                              if(Read7280_C()==1)
+ 378   8                              {
+ 379   9                                uart1SBuf[12]=uart1SBuf[12]|0x01;
+ 380   9                              } 
+ 381   8                            
+ 382   8                            }
+ 383   7                            uart1SBuf[13]=CRC_value(uart1SBuf,13);
+ 384   7                            uart1senddata(uart1SBuf,15);  
+ 385   7                                    
+ 386   7                            break;
+ 387   7                            
+ 388   7                            default :
+ 389   7                              
+ 390   7                             //未知指令
+ 391   7                             make_data_bus(0x05,0x00);    
+ 392   7                             uart1SBuf[6]=0xFF; //功能码    
+ 393   7                             uart1SBuf[7]=0x00;//功能码 
+ 394   7                             uart1SBuf[8]=0x00;//功能码 
+ 395   7                             uart1SBuf[9]=0x00;//功能码 
+ 396   7                             uart1SBuf[10]=0x00;//功能码            
+ 397   7                             uart1SBuf[11]=OTHERERROR;  // 
+ 398   7                             uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 399   7                             uart1senddata(uart1SBuf,14);
+ 400   7                                            
+ 401   7                            break;
+ 402   7      
+ 403   7                          }       
+ 404   6                          break;  
+ 405   6                      
+ 406   6      
+ 407   6                    //传感器状态
+ 408   6                    case 0x04 :
+ 409   6                      
+ 410   6                    
+ 411   6                          switch(uart1rBuf[8]) //条件分支，03 --7280  02---510
+ 412   6                          {
+ 413   7                            
+ 414   7                            //出片通道传感器状态
+ 415   7                            case 0x02 :
+ 416   7                                
+ 417   7                            make_data_bus(0x06,0x00); 
+ 418   7                            
+ 419   7                            uart1SBuf[11]=0x07;  // 表示 7个传感器
+ 420   7                            
+ 421   7                            uart1SBuf[12]=0x00;  //首先都置0
+ 422   7                            
+ 423   7                            //读传感器值
+ 424   7                            if(MOTO_S8S0()==1)
+ 425   7                            {
+ 426   8                              uart1SBuf[12]=uart1SBuf[12]|0x01;
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 8   
+
+ 427   8                            } 
+ 428   7                            if(MOTO_S7S1()==1)
+ 429   7                            {
+ 430   8                              uart1SBuf[12]=uart1SBuf[12]|0x02;
+ 431   8                            } 
+ 432   7                            if(MOTO_S6S2()==1)
+ 433   7                            {
+ 434   8                              uart1SBuf[12]=uart1SBuf[12]|0x04;
+ 435   8                            } 
+ 436   7                            if(MOTO_S5S3()==1)
+ 437   7                            {
+ 438   8                              uart1SBuf[12]=uart1SBuf[12]|0x08;
+ 439   8                            } 
+ 440   7                            if(MOTO_S4S4()==1)
+ 441   7                            {
+ 442   8                              uart1SBuf[12]=uart1SBuf[12]|0x10;
+ 443   8                            }
+ 444   7                            if(MOTO_S3S5()==1)
+ 445   7                            {
+ 446   8                              uart1SBuf[12]=uart1SBuf[12]|0x20;
+ 447   8                            } 
+ 448   7                            if(MOTO_S2S6()==1)
+ 449   7                            {
+ 450   8                              uart1SBuf[12]=uart1SBuf[12]|0x00;  //计数不做处理统一报0
+ 451   8                            } 
+ 452   7                  
+ 453   7                            uart1SBuf[13]=CRC_value(uart1SBuf,13);
+ 454   7                            uart1senddata(uart1SBuf,15);  
+ 455   7                                    
+ 456   7                            break;
+ 457   7      
+ 458   7                            default :
+ 459   7                              
+ 460   7                             //未知指令
+ 461   7                             make_data_bus(0x05,0x00);    
+ 462   7                             uart1SBuf[6]=0xFF; //功能码    
+ 463   7                             uart1SBuf[7]=0x00;//功能码 
+ 464   7                             uart1SBuf[8]=0x00;//功能码 
+ 465   7                             uart1SBuf[9]=0x00;//功能码 
+ 466   7                             uart1SBuf[10]=0x00;//功能码            
+ 467   7                             uart1SBuf[11]=OTHERERROR;  // 
+ 468   7                             uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 469   7                             uart1senddata(uart1SBuf,14);
+ 470   7                                            
+ 471   7                            break;
+ 472   7      
+ 473   7                          } 
+ 474   6                      
+ 475   6                    break;
+ 476   6                                
+ 477   6                      
+ 478   6                    // 查询温度
+ 479   6                      case 0x08 :
+ 480   6                      
+ 481   6                      //查询加热温度 
+ 482   6                      
+ 483   6                      //读温度  
+ 484   6      
+ 485   6                      switch(uart1rBuf[8])  //加热器类别
+ 486   6                      {
+ 487   7                         case  0x01 :   //整机温度
+ 488   7                           
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 9   
+
+ 489   7                         break;
+ 490   7                        
+ 491   7                         case  0x02 :   //整机温度
+ 492   7                           
+ 493   7                          make_data_bus(0x06,0x00);  //温度 六字节 
+ 494   7                          //温度在定时器中读取，每10秒读取一次                   
+ 495   7                          uart1SBuf[11] = temputer2;  //  温度，低位在前
+ 496   7                          uart1SBuf[12] = temputer2 >> 8;  //  温度，高位在后                
+ 497   7                          uart1SBuf[13]=CRC_value(uart1SBuf,13);
+ 498   7                          uart1senddata(uart1SBuf,15);
+ 499   7               
+ 500   7                         break;
+ 501   7                        
+ 502   7                         case  0x03 :   //加热器温度状态
+ 503   7                           
+ 504   7                         break;
+ 505   7                         
+ 506   7                         case  0x04 :   //整机温度状态
+ 507   7                           
+ 508   7                         break;
+ 509   7                        
+ 510   7         
+ 511   7                       default : 
+ 512   7                         
+ 513   7                       //未知指令
+ 514   7                       make_data_bus(0x05,0x00);    
+ 515   7                       uart1SBuf[6]=0xFF; //功能码    
+ 516   7                       uart1SBuf[7]=0x00;//功能码 
+ 517   7                       uart1SBuf[8]=0x00;//功能码 
+ 518   7                       uart1SBuf[9]=0x00;//功能码 
+ 519   7                       uart1SBuf[10]=0x00;//功能码            
+ 520   7                       uart1SBuf[11]=OTHERERROR;  // 
+ 521   7                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 522   7                       uart1senddata(uart1SBuf,14);
+ 523   7                       break;
+ 524   7                        
+ 525   7                      }//end  查询温度
+ 526   6                      break;                  
+ 527   6                      
+ 528   6                      
+ 529   6                      //查询 初始化状态  数据长度5
+ 530   6                      case 0x09 :
+ 531   6                        
+ 532   6                        make_data_bus(0x05,0x00);
+ 533   6                      
+ 534   6                        uart1SBuf[11]=sys_init_state;  //直接上报初始化状态
+ 535   6                        
+ 536   6                        //计算校验
+ 537   6                        uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 538   6                        
+ 539   6                        uart1senddata(uart1SBuf,14);
+ 540   6                      
+ 541   6                       break; 
+ 542   6                      
+ 543   6                      
+ 544   6                      //查询加热器状态
+ 545   6                      case 0x0B :
+ 546   6                        
+ 547   6                        make_data_bus(0x05,0x00);
+ 548   6                       
+ 549   6                       if(Heat==0) 
+ 550   6                       { 
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 10  
+
+ 551   7                        uart1SBuf[11]=1;  //1 表示加热器开 
+ 552   7                       }  
+ 553   6                       else
+ 554   6                       {   
+ 555   7                         uart1SBuf[11]=0;  //1 表示加热器关
+ 556   7                       }
+ 557   6                                     
+ 558   6                        //计算校验
+ 559   6                        uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 560   6                        
+ 561   6                        uart1senddata(uart1SBuf,14);
+ 562   6                      
+ 563   6                       break; 
+ 564   6                      
+ 565   6                      
+ 566   6                      case 0x0e :
+ 567   6                        
+ 568   6                             switch(uart1rBuf[8])  //废墨类别
+ 569   6                            {
+ 570   7                               case  0x01 :   //451
+ 571   7                               //未知指令
+ 572   7                               make_data_bus(0x05,0x00);    
+ 573   7                               uart1SBuf[6]=0xFF; //功能码    
+ 574   7                               uart1SBuf[7]=0x00;//功能码 
+ 575   7                               uart1SBuf[8]=0x00;//功能码 
+ 576   7                               uart1SBuf[9]=0x00;//功能码 
+ 577   7                               uart1SBuf[10]=0x00;//功能码            
+ 578   7                               uart1SBuf[11]=OTHERERROR;  // 
+ 579   7                               uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 580   7                               uart1senddata(uart1SBuf,14);
+ 581   7                                 
+ 582   7                               break;
+ 583   7                              
+ 584   7                               case  0x02 :   //7280
+ 585   7                                
+ 586   7                                make_data_bus(0x05,0x00); 
+ 587   7                               
+ 588   7                               uart1SBuf[11]=0x00;  //高 ，未满
+ 589   7                               
+ 590   7                               if(C7280FM_PB==0x02)  //如果屏蔽将不检测 直接上报 0x00
+ 591   7                                {
+ 592   8      
+ 593   8                                    if(Read7280_FM()==1)  //无墨 为 高，  有墨 为低 ，低为 废墨满
+ 594   8                                    {
+ 595   9                                      uart1SBuf[11]=0x00;  //高 ，未满
+ 596   9                                    } 
+ 597   8                                    else
+ 598   8                                    {
+ 599   9                                      uart1SBuf[11]=0x01;  //高 ，未满
+ 600   9                                      
+ 601   9                                    }
+ 602   8                                    
+ 603   8                                }   
+ 604   7                                //计算校验
+ 605   7                                uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 606   7                                uart1senddata(uart1SBuf,14);
+ 607   7      
+ 608   7                               break;
+ 609   7                              
+ 610   7                               case  0x03 :   //510
+ 611   7                                 
+ 612   7                                make_data_bus(0x05,0x00); 
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 11  
+
+ 613   7                               
+ 614   7                                uart1SBuf[11]=0x00;  //高 ，未满
+ 615   7                               
+ 616   7                                if(IPF510FM_PB==0x02)  //如果屏蔽将不检测 直接上报 0x00
+ 617   7                                {
+ 618   8      
+ 619   8                                  if(ReadIpf510_FM()==1)  //无墨 为 高，  有墨 为低 ，低为 废墨满
+ 620   8                                  {
+ 621   9                                    uart1SBuf[11]=0x00;  //高 ，未满
+ 622   9                                  } 
+ 623   8                                  else
+ 624   8                                  {
+ 625   9                                    uart1SBuf[11]=0x01;  //高 ，未满
+ 626   9                                    
+ 627   9                                  }
+ 628   8                                }
+ 629   7                                //计算校验
+ 630   7                                uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 631   7                                uart1senddata(uart1SBuf,14);
+ 632   7                                 
+ 633   7                               break;
+ 634   7                               
+ 635   7                               case  0x04 :   //5100
+ 636   7                                 
+ 637   7                               //未知指令
+ 638   7                               make_data_bus(0x05,0x00);    
+ 639   7                               uart1SBuf[6]=0xFF; //功能码    
+ 640   7                               uart1SBuf[7]=0x00;//功能码 
+ 641   7                               uart1SBuf[8]=0x00;//功能码 
+ 642   7                               uart1SBuf[9]=0x00;//功能码 
+ 643   7                               uart1SBuf[10]=0x00;//功能码            
+ 644   7                               uart1SBuf[11]=OTHERERROR;  // 
+ 645   7                               uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 646   7                               uart1senddata(uart1SBuf,14);
+ 647   7                                 
+ 648   7                               break;
+ 649   7                              
+ 650   7               
+ 651   7                             default : 
+ 652   7                               
+ 653   7                              //未知指令
+ 654   7                             make_data_bus(0x05,0x00);    
+ 655   7                             uart1SBuf[6]=0xFF; //功能码    
+ 656   7                             uart1SBuf[7]=0x00;//功能码 
+ 657   7                             uart1SBuf[8]=0x00;//功能码 
+ 658   7                             uart1SBuf[9]=0x00;//功能码 
+ 659   7                             uart1SBuf[10]=0x00;//功能码            
+ 660   7                             uart1SBuf[11]=OTHERERROR;  // 
+ 661   7                             uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 662   7                             uart1senddata(uart1SBuf,14);
+ 663   7                                 break;
+ 664   7                              
+ 665   7                            }
+ 666   6                      break;
+ 667   6                    //end  废墨查询
+ 668   6                  
+ 669   6                    //查询出片状态                      
+ 670   6                      case 0x0F : 
+ 671   6                        
+ 672   6                        make_data_bus(0x05,0x00); 
+ 673   6                        uart1SBuf[11]=Paper_Send_OK;  //高 ，未满
+ 674   6      
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 12  
+
+ 675   6                        //计算校验
+ 676   6                        uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 677   6                        uart1senddata(uart1SBuf,14);
+ 678   6                        break;    
+ 679   6                      
+ 680   6                      default :
+ 681   6                        
+ 682   6                       //未知指令
+ 683   6                       make_data_bus(0x05,0x00);    
+ 684   6                       uart1SBuf[6]=0xFF; //功能码    
+ 685   6                       uart1SBuf[7]=0x00;//功能码 
+ 686   6                       uart1SBuf[8]=0x00;//功能码 
+ 687   6                       uart1SBuf[9]=0x00;//功能码 
+ 688   6                       uart1SBuf[10]=0x00;//功能码            
+ 689   6                       uart1SBuf[11]=OTHERERROR;  // 
+ 690   6                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 691   6                       uart1senddata(uart1SBuf,14);
+ 692   6                        
+ 693   6                        break;
+ 694   6      
+ 695   6                   }//end  uart1rBuf[7]-数据域第一个数据 判断查询具体内容         
+ 696   5                            
+ 697   5                  break;
+ 698   5                //控制指令
+ 699   5                   
+ 700   5                case 0x02 :
+ 701   5                  
+ 702   5                 // uart1senddata(uart1rBuf,uart1rBuf[uart1ReceiveNum-1]);//3
+ 703   5                    switch(uart1rBuf[7])
+ 704   5                   {
+ 705   6                      //控制加热器
+ 706   6                     case 0x03 :    
+ 707   6                     
+ 708   6                         if(uart1rBuf[9]==0x01)    //开加热器
+ 709   6                         {                     
+ 710   7                            HeatOn();     //低电平开
+ 711   7                           
+ 712   7                           if(Heat==0x00)  //判断是否开成功
+ 713   7                           {
+ 714   8                             uart1SBuf[11]=0;  // 0表示成功
+ 715   8                           }
+ 716   7                           else
+ 717   7                           {
+ 718   8                             uart1SBuf[11]=1;  // 1表示失败
+ 719   8                           }  
+ 720   7                           
+ 721   7                           make_data_bus(0x05,0x00);          
+ 722   7                          //计算校验
+ 723   7                          uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 724   7                          uart1senddata(uart1SBuf,14);
+ 725   7                          break;                         
+ 726   7                         }    
+ 727   6      
+ 728   6                         if(uart1rBuf[9]==0x02)    //关加热器
+ 729   6                         {
+ 730   7                           
+ 731   7                           HeatOff();   //高电平关
+ 732   7                           
+ 733   7                           if(Heat==1)  //判断是否关成功
+ 734   7                           {
+ 735   8                             uart1SBuf[11]=0;  // 0表示成功
+ 736   8                           }
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 13  
+
+ 737   7                           else
+ 738   7                           {
+ 739   8                             uart1SBuf[11]=1;  // 1表示失败
+ 740   8                           }  
+ 741   7      
+ 742   7                            make_data_bus(0x05,0x00);         
+ 743   7                            //计算校验
+ 744   7                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 745   7                            uart1senddata(uart1SBuf,14);
+ 746   7                             
+ 747   7                           break;                      
+ 748   7                         }
+ 749   6      
+ 750   6                         break; 
+ 751   6      
+ 752   6                       //end 加热器控制
+ 753   6                         
+ 754   6                      //加热器风扇控制 
+ 755   6                      case 0x07 : 
+ 756   6                        
+ 757   6                         if(uart1rBuf[9]==0x01)    //开加热器风扇
+ 758   6                         {
+ 759   7                           
+ 760   7                           HeatFanOn();     //低电平开
+ 761   7                           
+ 762   7                           if(HeatFan==0)  //判断是否开成功
+ 763   7                           {
+ 764   8                             uart1SBuf[11]=0;  // 0表示成功
+ 765   8                           }
+ 766   7                           else
+ 767   7                           {
+ 768   8                             uart1SBuf[11]=1;  // 1表示失败
+ 769   8                             
+ 770   8                           }    
+ 771   7      
+ 772   7                            make_data_bus(0x05,0x00);         
+ 773   7                            //计算校验
+ 774   7                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 775   7                            uart1senddata(uart1SBuf,14);
+ 776   7                           break;                      
+ 777   7                         }
+ 778   6                         
+ 779   6                         if(uart1rBuf[9]==0x02)    //关加热器风扇
+ 780   6                         {
+ 781   7                           
+ 782   7                           HeatFanOff();   //高电平关
+ 783   7                           
+ 784   7                           if(HeatFan==1)  //判断是否关成功
+ 785   7                           {
+ 786   8                             uart1SBuf[11]=0;  // 0表示成功
+ 787   8                           }
+ 788   7                           else
+ 789   7                           {
+ 790   8                             uart1SBuf[11]=1;  // 1表示失败
+ 791   8                           }    
+ 792   7      
+ 793   7                           make_data_bus(0x05,0x00);          
+ 794   7                          //计算校验
+ 795   7                          uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 796   7                          uart1senddata(uart1SBuf,14);
+ 797   7                          break;  
+ 798   7       
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 14  
+
+ 799   7                         }
+ 800   6                         break;
+ 801   6                      //end 风扇控制   
+ 802   6       
+ 803   6                      //导光灯控制
+ 804   6                      //加热器风扇控制 
+ 805   6                      case 0x01 :
+ 806   6                        
+ 807   6                      switch(uart1rBuf[8])  //灯类型入口
+ 808   6                      {
+ 809   7                         case  0x01 :   //导光灯
+ 810   7                           
+ 811   7                         if(uart1rBuf[9]==0x01)    //开加导光灯
+ 812   7                         {
+ 813   8                           
+ 814   8                           DaoGuangLedOn();     //高电平开
+ 815   8                           
+ 816   8                           if(DaoGuangLed==1)  //判断是否开成功
+ 817   8                           {
+ 818   9                             uart1SBuf[11]=0;  // 0表示成功
+ 819   9                           }
+ 820   8                           else
+ 821   8                           {
+ 822   9                             uart1SBuf[11]=1;  // 1表示失败
+ 823   9                           }  
+ 824   8      
+ 825   8       
+ 826   8                          make_data_bus(0x05,0x00);         
+ 827   8                          //计算校验
+ 828   8                          uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 829   8                          uart1senddata(uart1SBuf,14);
+ 830   8                          break;  
+ 831   8                           
+ 832   8                         }
+ 833   7                        
+ 834   7                         
+ 835   7                         if(uart1rBuf[9]==0x02)    //关导光灯
+ 836   7                         {
+ 837   8                           
+ 838   8                           DaoGuangLedOff();   //低电平关
+ 839   8                           
+ 840   8                           if(DaoGuangLed==0)  //判断是否关成功
+ 841   8                           {
+ 842   9                             uart1SBuf[11]=0;  // 0表示成功
+ 843   9                           }
+ 844   8                           else
+ 845   8                           {
+ 846   9                             uart1SBuf[11]=1;  // 1表示失败
+ 847   9                           }   
+ 848   8      
+ 849   8                            make_data_bus(0x05,0x00);         
+ 850   8                            //计算校验
+ 851   8                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 852   8                            uart1senddata(uart1SBuf,14);
+ 853   8                            break;                       
+ 854   8                         }
+ 855   7                         
+ 856   7                      
+ 857   7                       //end 导光灯控制
+ 858   7                         
+ 859   7                       //报告灯控制  
+ 860   7                        case  0x02 :  //报告口灯
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 15  
+
+ 861   7                          
+ 862   7                         if(uart1rBuf[9]==0x01)    //开报告灯
+ 863   7                         {
+ 864   8                           
+ 865   8                           BaoGaoLedOn();     //高电平开
+ 866   8                           
+ 867   8                           if(BaoGaoLed==1)  //判断是否开成功
+ 868   8                           {
+ 869   9                             uart1SBuf[11]=0;  // 0表示成功
+ 870   9                           }
+ 871   8                           else
+ 872   8                           {
+ 873   9                             uart1SBuf[11]=1;  // 1表示失败
+ 874   9                           }  
+ 875   8      
+ 876   8      
+ 877   8                            make_data_bus(0x05,0x00);         
+ 878   8                           //计算校验
+ 879   8                           uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 880   8                           uart1senddata(uart1SBuf,14);
+ 881   8                           break;                    
+ 882   8                         }
+ 883   7                                           
+ 884   7                         if(uart1rBuf[9]==0x02)    //关报告灯
+ 885   7                         {
+ 886   8                           
+ 887   8                           BaoGaoLedOff();   //低电平关
+ 888   8                           
+ 889   8                           if(BaoGaoLed==0)  //判断是否关成功
+ 890   8                           {
+ 891   9                             uart1SBuf[11]=0;  // 0表示成功
+ 892   9                           }
+ 893   8                           else
+ 894   8                           {
+ 895   9                             uart1SBuf[11]=1;  // 1表示失败
+ 896   9                           }   
+ 897   8      
+ 898   8                            make_data_bus(0x05,0x00);         
+ 899   8                            //计算校验
+ 900   8                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 901   8                            uart1senddata(uart1SBuf,14);
+ 902   8                           break;                      
+ 903   8                         }
+ 904   7                         
+ 905   7                         
+ 906   7                         //未知指令
+ 907   7                           make_data_bus(0x05,0x00);    
+ 908   7                           uart1SBuf[6]=0xFF; //功能码    
+ 909   7                           uart1SBuf[7]=0x00;//功能码 
+ 910   7                           uart1SBuf[8]=0x00;//功能码 
+ 911   7                           uart1SBuf[9]=0x00;//功能码 
+ 912   7                           uart1SBuf[10]=0x00;//功能码            
+ 913   7                           uart1SBuf[11]=OTHERERROR;  // 
+ 914   7                           uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 915   7                           uart1senddata(uart1SBuf,14);
+ 916   7                           break;
+ 917   7                         
+ 918   7                        
+ 919   7                       //end 导光灯控制
+ 920   7                         
+ 921   7                         
+ 922   7                         
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 16  
+
+ 923   7                       default : 
+ 924   7                         
+ 925   7                        //未知指令
+ 926   7                       make_data_bus(0x05,0x00);    
+ 927   7                       uart1SBuf[6]=0xFF; //功能码    
+ 928   7                       uart1SBuf[7]=0x00;//功能码 
+ 929   7                       uart1SBuf[8]=0x00;//功能码 
+ 930   7                       uart1SBuf[9]=0x00;//功能码 
+ 931   7                       uart1SBuf[10]=0x00;//功能码            
+ 932   7                       uart1SBuf[11]=OTHERERROR;  // 
+ 933   7                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 934   7                       uart1senddata(uart1SBuf,14);
+ 935   7                       break;
+ 936   7                        
+ 937   7                      }//end  uart1rBuf[8]-数据域第一个数据 判断控制内容  
+ 938   6                      break;
+ 939   6                      
+ 940   6                      //电机控制
+ 941   6                      case 0x0C :     
+ 942   6                      switch(uart1rBuf[8])  //电机类型
+ 943   6                      {
+ 944   7                         case  0x01 :  
+ 945   7      
+ 946   7                         //未知指令
+ 947   7                         make_data_bus(0x05,0x00);    
+ 948   7                         uart1SBuf[6]=0xFF; //功能码    
+ 949   7                         uart1SBuf[7]=0x00;//功能码 
+ 950   7                         uart1SBuf[8]=0x00;//功能码 
+ 951   7                         uart1SBuf[9]=0x00;//功能码 
+ 952   7                         uart1SBuf[10]=0x00;//功能码            
+ 953   7                         uart1SBuf[11]=OTHERERROR;  // 
+ 954   7                         uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+ 955   7                         uart1senddata(uart1SBuf,14);                  
+ 956   7                           
+ 957   7                         break;
+ 958   7                           
+ 959   7                       //出片点击
+ 960   7                        case  0x02 :  //出片电机
+ 961   7                          
+ 962   7                        //55 04 00 00 00 FF 02 0C 02 01 00 69 0D
+ 963   7                          
+ 964   7                         if(uart1rBuf[9]==0x01)    //正转
+ 965   7                         {
+ 966   8                           
+ 967   8                           MotoDc1Run(100,FORWARD,10); // 1/2占空比 正转5S    全速
+ 968   8                           
+ 969   8                           uart1SBuf[11]=0x00;  // 0表示成功
+ 970   8      
+ 971   8                            make_data_bus(0x05,0x00);         
+ 972   8                           //计算校验
+ 973   8                           uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 974   8                           uart1senddata(uart1SBuf,14);
+ 975   8                           break;                    
+ 976   8                         }
+ 977   7                                           
+ 978   7                         if(uart1rBuf[9]==0x02)    //停止
+ 979   7                         {
+ 980   8                           
+ 981   8                            MotoDc1Stop();     
+ 982   8                           // MotoDc2Stop();
+ 983   8      
+ 984   8                             uart1SBuf[11]=0;  // 1表示失败
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 17  
+
+ 985   8                           
+ 986   8                            make_data_bus(0x05,0x00);         
+ 987   8                            //计算校验
+ 988   8                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+ 989   8                            uart1senddata(uart1SBuf,14);
+ 990   8                           break;                      
+ 991   8                         }
+ 992   7                         
+ 993   7                         break;
+ 994   7      
+ 995   7                        //离合电机
+ 996   7                        case 0x03 :
+ 997   7                          
+ 998   7                        if(uart1rBuf[9]==0x01)    //正转
+ 999   7                         {
+1000   8                           
+1001   8                           MotoDc2Run(30,FORWARD,10); //100占空比 正转5S    全速
+1002   8                           
+1003   8                           uart1SBuf[11]=0x00;  // 0表示成功
+1004   8      
+1005   8                            make_data_bus(0x05,0x00);         
+1006   8                           //计算校验
+1007   8                           uart1SBuf[12]=CRC_value(uart1SBuf,12);
+1008   8                           uart1senddata(uart1SBuf,14);
+1009   8                           break;                    
+1010   8                         }
+1011   7                                           
+1012   7                         if(uart1rBuf[9]==0x02)    //停止
+1013   7                         {
+1014   8                           
+1015   8                            //MotoDc1Stop();     
+1016   8                              MotoDc2Stop();
+1017   8      
+1018   8                             uart1SBuf[11]=0;  // 0表示成功
+1019   8                           
+1020   8                            make_data_bus(0x05,0x00);         
+1021   8                            //计算校验
+1022   8                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+1023   8                            uart1senddata(uart1SBuf,14);
+1024   8                           break;                      
+1025   8                         }
+1026   7                         break;
+1027   7                         
+1028   7                       default :
+1029   7                          //未知指令
+1030   7                       make_data_bus(0x05,0x00);    
+1031   7                       uart1SBuf[6]=0xFF; //功能码    
+1032   7                       uart1SBuf[7]=0x00;//功能码 
+1033   7                       uart1SBuf[8]=0x00;//功能码 
+1034   7                       uart1SBuf[9]=0x00;//功能码 
+1035   7                       uart1SBuf[10]=0x00;//功能码            
+1036   7                       uart1SBuf[11]=OTHERERROR;  // 
+1037   7                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1038   7                       uart1senddata(uart1SBuf,14);
+1039   7                       break;
+1040   7                        
+1041   7                      }//end  uart1rBuf[8]-数据域第一个数据 判断控制内容  
+1042   6                         //end 电机控制
+1043   6                      break;
+1044   6                      //蜂鸣器控制
+1045   6                      case  0x0D :
+1046   6                        
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 18  
+
+1047   6                      switch(uart1rBuf[8])
+1048   6                      {
+1049   7                        
+1050   7                        case 0x00 :
+1051   7                        
+1052   7                        if(uart1rBuf[9]==0x01)    //开蜂鸣器
+1053   7                         {
+1054   8                           
+1055   8                           
+1056   8                           BuzzerOn();   //低电平关
+1057   8                           
+1058   8                           if(Buzzer==1)  //判断是否关成功
+1059   8                           {
+1060   9                             uart1SBuf[11]=0;  // 0表示成功
+1061   9                           }
+1062   8                           else
+1063   8                           {
+1064   9                             uart1SBuf[11]=1;  // 1表示失败
+1065   9                           }   
+1066   8      
+1067   8                            make_data_bus(0x05,0x00);         
+1068   8                           //计算校验
+1069   8                           uart1SBuf[12]=CRC_value(uart1SBuf,12);
+1070   8                           uart1senddata(uart1SBuf,14);
+1071   8                           break;                    
+1072   8                         }
+1073   7                         
+1074   7                         if(uart1rBuf[9]==0x02)    //关蜂鸣器
+1075   7                         {
+1076   8                           
+1077   8                           BuzzerOff();   //低电平关
+1078   8                           
+1079   8                           if(Buzzer==0)  //判断是否关成功
+1080   8                           {
+1081   9                             uart1SBuf[11]=0;  // 0表示成功
+1082   9                           }
+1083   8                           else
+1084   8                           {
+1085   9                             uart1SBuf[11]=1;  // 1表示失败
+1086   9                           }
+1087   8                           
+1088   8                            make_data_bus(0x05,0x00);         
+1089   8                            //计算校验
+1090   8                            uart1SBuf[12]=CRC_value(uart1SBuf,12);
+1091   8                            uart1senddata(uart1SBuf,14);
+1092   8                           break;                      
+1093   8                         }
+1094   7                         
+1095   7                         break;
+1096   7                       
+1097   7                      default : 
+1098   7                       //未知指令
+1099   7                       make_data_bus(0x05,0x00);    
+1100   7                       uart1SBuf[6]=0xFF; //功能码    
+1101   7                       uart1SBuf[7]=0x00;//功能码 
+1102   7                       uart1SBuf[8]=0x00;//功能码 
+1103   7                       uart1SBuf[9]=0x00;//功能码 
+1104   7                       uart1SBuf[10]=0x00;//功能码            
+1105   7                       uart1SBuf[11]=OTHERERROR;  // 
+1106   7                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1107   7                       uart1senddata(uart1SBuf,14); 
+1108   7                     
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 19  
+
+1109   7                       break;
+1110   7      
+1111   7                      }  //end  buzzer  control
+1112   6                      
+1113   6                      break;
+1114   6                      
+1115   6                      default :
+1116   6                        
+1117   6                       //未知指令
+1118   6                       make_data_bus(0x05,0x00);    
+1119   6                       uart1SBuf[6]=0xFF; //功能码    
+1120   6                       uart1SBuf[7]=0x00;//功能码 
+1121   6                       uart1SBuf[8]=0x00;//功能码 
+1122   6                       uart1SBuf[9]=0x00;//功能码 
+1123   6                       uart1SBuf[10]=0x00;//功能码            
+1124   6                       uart1SBuf[11]=OTHERERROR;  // 
+1125   6                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1126   6                       uart1senddata(uart1SBuf,14);
+1127   6                        break;
+1128   6                   }//end  uart1rBuf[7]-数据域第一个数据 判断控制内容   
+1129   5                   break;
+1130   5                   
+1131   5                   
+1132   5                //系统清零
+1133   5                case 0x03 :
+1134   5                  
+1135   5                              //未知指令
+1136   5                 make_data_bus(0x05,0x00);    
+1137   5                 uart1SBuf[6]=0xFF; //功能码    
+1138   5                 uart1SBuf[7]=0x00;//功能码 
+1139   5                 uart1SBuf[8]=0x00;//功能码 
+1140   5                 uart1SBuf[9]=0x00;//功能码 
+1141   5                 uart1SBuf[10]=0x00;//功能码            
+1142   5                 uart1SBuf[11]=OTHERERROR;  // 
+1143   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1144   5                 uart1senddata(uart1SBuf,14);
+1145   5            
+1146   5                  break;
+1147   5                
+1148   5                //0x05  屏蔽
+1149   5                case 0x05 :
+1150   5                  
+1151   5                if(uart1rBuf[7]==0x01)  // 类别为墨水
+1152   5                { 
+1153   6                  
+1154   6                     switch(uart1rBuf[8])  //墨水类别  0X01-451  0X02--7280  0X03---510  0X04-5100  0X05--废墨
+1155   6                     {
+1156   7                       
+1157   7                        //屏蔽墨水
+1158   7                        case 0x03 :   //屏蔽510
+1159   7                          
+1160   7                         if(uart1rBuf[9]==0x01)  // 屏蔽
+1161   7                         {
+1162   8                           IPF510MT_PB=0x01;
+1163   8      
+1164   8                         }
+1165   7                         if(uart1rBuf[9]==0x02)  // 启用
+1166   7                         {
+1167   8                           IPF510MT_PB=0x02;
+1168   8      
+1169   8                         }                     
+1170   7                          make_data_bus(0x05,0x00);
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 20  
+
+1171   7                        
+1172   7                          uart1SBuf[11]=0x00;  // 0表示成功
+1173   7                          //计算校验
+1174   7                          uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1175   7                          
+1176   7                          uart1senddata(uart1SBuf,14);
+1177   7                         break; 
+1178   7                        
+1179   7                        //屏蔽墨水
+1180   7                        case 0x02 :
+1181   7                          
+1182   7                          if(uart1rBuf[9]==0x01)  // 屏蔽
+1183   7                         {
+1184   8                           C7280MT_PB=0x01;
+1185   8      
+1186   8                         }
+1187   7                         if(uart1rBuf[9]==0x02)  // 启用
+1188   7                         {
+1189   8                           C7280MT_PB=0x02;
+1190   8      
+1191   8                         }  
+1192   7                          make_data_bus(0x05,0x00);
+1193   7                        
+1194   7                          uart1SBuf[11]=0x00;  // 0表示成功
+1195   7                          //计算校验
+1196   7                          uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1197   7                          
+1198   7                          uart1senddata(uart1SBuf,14);
+1199   7                         break; 
+1200   7                        
+1201   7                        //屏蔽墨水
+1202   7                        case 0x05 :
+1203   7                          
+1204   7                         if(uart1rBuf[9]==0x01)  // 屏蔽
+1205   7                         {
+1206   8                          IPF510FM_PB=0x01;
+1207   8                          C7280FM_PB=0x01;    
+1208   8      
+1209   8                         }
+1210   7                         if(uart1rBuf[9]==0x02)  // 启用
+1211   7                         {
+1212   8                          IPF510FM_PB=0x02;
+1213   8                          C7280FM_PB=0x02;    
+1214   8                         }  
+1215   7                         
+1216   7                          make_data_bus(0x05,0x00);
+1217   7                        
+1218   7                          uart1SBuf[11]=0x00;  // 0表示成功
+1219   7                          //计算校验
+1220   7                          uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1221   7                          
+1222   7                          uart1senddata(uart1SBuf,14);
+1223   7                         break; 
+1224   7                        
+1225   7      
+1226   7                        default :
+1227   7                          
+1228   7                       //未知指令
+1229   7                       make_data_bus(0x05,0x00);    
+1230   7                       uart1SBuf[6]=0xFF; //功能码    
+1231   7                       uart1SBuf[7]=0x00;//功能码 
+1232   7                       uart1SBuf[8]=0x00;//功能码 
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 21  
+
+1233   7                       uart1SBuf[9]=0x00;//功能码 
+1234   7                       uart1SBuf[10]=0x00;//功能码            
+1235   7                       uart1SBuf[11]=OTHERERROR;  // 
+1236   7                       uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1237   7                       uart1senddata(uart1SBuf,14);
+1238   7                          
+1239   7                         break;
+1240   7      
+1241   7                       }  
+1242   6      
+1243   6      
+1244   6                       
+1245   6                 }    
+1246   5                 break;
+1247   5                
+1248   5      
+1249   5      
+1250   5                //确认/否认
+1251   5                case 0xFC :
+1252   5                  
+1253   5                //未知指令
+1254   5                 make_data_bus(0x05,0x00);    
+1255   5                 uart1SBuf[6]=0xFF; //功能码    
+1256   5                 uart1SBuf[7]=0x00;//功能码 
+1257   5                 uart1SBuf[8]=0x00;//功能码 
+1258   5                 uart1SBuf[9]=0x00;//功能码 
+1259   5                 uart1SBuf[10]=0x00;//功能码            
+1260   5                 uart1SBuf[11]=OTHERERROR;  // 
+1261   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1262   5                 uart1senddata(uart1SBuf,14);
+1263   5                  
+1264   5                  break;
+1265   5                
+1266   5                //升级更新
+1267   5                case 0xFD :
+1268   5                 //未知指令
+1269   5                 make_data_bus(0x05,0x00);    
+1270   5                 uart1SBuf[6]=0xFF; //功能码    
+1271   5                 uart1SBuf[7]=0x00;//功能码 
+1272   5                 uart1SBuf[8]=0x00;//功能码 
+1273   5                 uart1SBuf[9]=0x00;//功能码 
+1274   5                 uart1SBuf[10]=0x00;//功能码            
+1275   5                 uart1SBuf[11]=OTHERERROR;  // 
+1276   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1277   5                 uart1senddata(uart1SBuf,14); 
+1278   5                  break;
+1279   5                //主动上报
+1280   5                case 0xFE :
+1281   5                //未知指令
+1282   5                 make_data_bus(0x05,0x00);    
+1283   5                 uart1SBuf[6]=0xFF; //功能码    
+1284   5                 uart1SBuf[7]=0x00;//功能码 
+1285   5                 uart1SBuf[8]=0x00;//功能码 
+1286   5                 uart1SBuf[9]=0x00;//功能码 
+1287   5                 uart1SBuf[10]=0x00;//功能码            
+1288   5                 uart1SBuf[11]=OTHERERROR;  // 
+1289   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1290   5                 uart1senddata(uart1SBuf,14);
+1291   5                  
+1292   5                  break;
+1293   5                //错误通知
+1294   5                case 0xFF :
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 22  
+
+1295   5                 //未知指令
+1296   5                 make_data_bus(0x05,0x00);    
+1297   5                 uart1SBuf[6]=0xFF; //功能码    
+1298   5                 uart1SBuf[7]=0x00;//功能码 
+1299   5                 uart1SBuf[8]=0x00;//功能码 
+1300   5                 uart1SBuf[9]=0x00;//功能码 
+1301   5                 uart1SBuf[10]=0x00;//功能码            
+1302   5                 uart1SBuf[11]=OTHERERROR;  // 
+1303   5                 uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1304   5                 uart1senddata(uart1SBuf,14);
+1305   5                    
+1306   5                break;
+1307   5                
+1308   5                default : 
+1309   5                
+1310   5               //未知指令
+1311   5               make_data_bus(0x05,0x00);    
+1312   5               uart1SBuf[6]=0xFF; //功能码    
+1313   5               uart1SBuf[7]=0x00;//功能码 
+1314   5               uart1SBuf[8]=0x00;//功能码 
+1315   5               uart1SBuf[9]=0x00;//功能码 
+1316   5               uart1SBuf[10]=0x00;//功能码            
+1317   5               uart1SBuf[11]=OTHERERROR;  // 
+1318   5               uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1319   5               uart1senddata(uart1SBuf,14);
+1320   5               break;
+1321   5      
+1322   5             }//end SWITCH()    
+1323   4      
+1324   4            }//end if(CRC==uart1rBuf[uart1ReceiveNum-2])
+1325   3            else
+1326   3            {
+1327   4              //校验没过 返回02
+1328   4                make_data_bus(0x05,0x00);
+1329   4               uart1SBuf[6]=0xFF;//功能码 
+1330   4               uart1SBuf[7]=0x00;//功能码 
+1331   4               uart1SBuf[8]=0x00;//功能码 
+1332   4               uart1SBuf[9]=0x00;//功能码 
+1333   4               uart1SBuf[10]=0x00;//功能码    
+1334   4               uart1SBuf[11]=CRCERROR;  // 
+1335   4               uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1336   4               uart1senddata(uart1SBuf,14);
+1337   4            }
+1338   3            
+1339   3          }// end  0x55  0xff  0x0d 
+1340   2          else
+1341   2          {   
+1342   3            //头尾没过  返回03
+1343   3           make_data_bus(0x05,0x00);
+1344   3            
+1345   3           uart1SBuf[6]=0xFF;//功能码 
+1346   3           uart1SBuf[7]=0x00;//功能码 
+1347   3           uart1SBuf[8]=0x00;//功能码 
+1348   3           uart1SBuf[9]=0x00;//功能码 
+1349   3           uart1SBuf[10]=0x00;//功能码  
+1350   3            
+1351   3            if(uart1rBuf[0]!=0x55)
+1352   3            { 
+1353   4              uart1SBuf[11]=HEADERROR;  //
+1354   4            } 
+1355   3            
+1356   3            if(uart1rBuf[uart1ReceiveNum-1]!=0x0d)
+C51 COMPILER V9.52.0.0   COMWITHPC                                                         12/05/2016 09:37:58 PAGE 23  
+
+1357   3            {         
+1358   4              uart1SBuf[11]=ENDERROR;  // 
+1359   4            }
+1360   3            
+1361   3           uart1SBuf[12]=CRC_value(uart1SBuf,12);  
+1362   3           uart1senddata(uart1SBuf,14);
+1363   3          }
+1364   2      
+1365   2        
+1366   2        //清除相关标志    
+1367   2        uart1ReceiveNum=0;
+1368   2        uart1ReceivedFlag=0;    
+1369   2      
+1370   2        }//END if(uart1ReceivedFlag==1) 
+1371   1      
+1372   1      
+1373   1      }
+1374          
+1375          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3203    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =      1       3
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
